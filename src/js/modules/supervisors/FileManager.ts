@@ -44,15 +44,12 @@ class FileManager {
     private activeDir: string,
     private inactiveDir: string
   ) {
-    try {
-      this.managementClient = new ManagementClient(43118);
-      this.readCoprocessorFolder(repository, this.activeDir, false)
-        .then(() => this.readCoprocessorFolder(repository, this.submitDir))
-        .then(() => this.startWatchers(repository));
-    } catch (e) {
-      // TODO: This should be a FATAL error
-      logger.error(`Failed to register watch(es): ${e.message}`);
-    }
+    this.readCoprocessorFolder(repository, this.activeDir, false)
+      .then(() => this.readCoprocessorFolder(repository, this.submitDir))
+      .then(() => this.startWatchers(repository))
+      .catch((e) => {
+        throw Error(`Failed startup the FileManager: ${e.message}`);
+      });
   }
 
   /**
@@ -230,20 +227,29 @@ class FileManager {
       `Initiating RPC call to redpandas coprocessor service at endpoint - ` +
         `disable_coprocessors with data: ${coprocessors}`
     );
-    return this.managementClient
-      .disable_copros({ inputs: coprocessors.map((coproc) => coproc.globalId) })
-      .then((response) => {
-        const errors = validateDisableResponseCode(response, coprocessors);
-        if (errors.length > 0) {
-          const compactedErrors = this.compactErrors([errors]);
-          logger.error(
-            `disable_coprocessors RPC returned with errors: ${compactedErrors}`
-          );
-          return Promise.reject(compactedErrors);
-        } else {
-          return Promise.resolve();
-        }
-      });
+    // TODO(rob) on err
+    return this.getClient().then((client) => {
+      return client
+        .disable_copros({
+          inputs: coprocessors.map((coproc) => coproc.globalId),
+        })
+        .then((response) => {
+          const errors = validateDisableResponseCode(response, coprocessors);
+          if (errors.length > 0) {
+            const compactedErrors = this.compactErrors([errors]);
+            logger.error(
+              `disable_coprocessors() RPC returned with errors: ${compactedErrors}`
+            );
+            return Promise.reject(compactedErrors);
+          } else {
+            return Promise.resolve();
+          }
+        })
+        .catch((e) => {
+          logger.error(`disable_coprocessors() RPC failed: ${e.message}`);
+          throw e;
+        });
+    });
   }
 
   /**
@@ -268,12 +274,13 @@ class FileManager {
   ): Promise<void> {
     if (coprocessors.length == 0) {
       return Promise.resolve();
-    } else {
-      logger.info(
-        `Initiating RPC call to redpandas coprocessor service at endpoint - ` +
-          `enable_coprocessors with data: ${coprocessors}`
-      );
-      return this.managementClient
+    }
+    logger.info(
+      `Initiating RPC call to redpandas coprocessor service at endpoint - ` +
+        `enable_coprocessors with data: ${coprocessors}`
+    );
+    return this.getClient().then((client) => {
+      return client
         .enable_copros({
           coprocessors: coprocessors.map((coproc) => ({
             id: coproc.globalId,
@@ -305,11 +312,10 @@ class FileManager {
                 `${compactedErrors}`
             );
             return Promise.reject(compactedErrors);
-          } else {
-            return Promise.resolve();
           }
+          return Promise.resolve();
         });
-    }
+    });
   }
 
   /**
@@ -366,7 +372,8 @@ class FileManager {
     if (destination == this.activeDir) {
       destinationPath = `${destination}/${name}.js`;
     } else {
-      destinationPath = `${destination}/${name}.js.vectorized.${coprocessor.checksum}.bk`;
+      destinationPath =
+        `${destination}/${name}.js.vectorized.${coprocessor.checksum}.bk`;
     }
     return renamePromise(coprocessor.filename, destinationPath).then(() => ({
       ...coprocessor,
@@ -394,6 +401,37 @@ class FileManager {
       logger.info(`Detected removed file from active dir: ${filePath}`);
       this.removeHandleFromFilePath(filePath, repository);
     });
+  }
+
+  /**
+   * Lazily load the ManagementClient
+   * Retires and sleeps 1s between configurable max number of attempts
+   *
+   * @param retries - Max number of connection attempts
+   * @return Promise with management client on success or error on failure
+   */
+  private getClient(): Promise<ManagementClient> {
+    if (!this.managementClient) {
+      return ManagementClient.create(43118)
+        .then((client) => {
+          logger.info("Succeeded in establishing a connection to redpanda");
+          this.managementClient = client;
+          return client;
+        })
+        .catch((err) => {
+          logger.warn(
+            `Failed to connect to redpanda, retrying again, reason: ${err.message}`
+          );
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              this.getClient()
+                .then((response) => resolve(response))
+                .catch((error) => reject(error));
+            }, 1000);
+          });
+        });
+    }
+    return Promise.resolve(this.managementClient);
   }
 }
 
