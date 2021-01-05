@@ -62,9 +62,8 @@ FIXTURE_TEST(test_coproc_router_no_results, router_test_fixture) {
 FIXTURE_TEST(test_coproc_router_simple, router_test_fixture) {
     auto client = make_client();
     client.connect().get();
-    // Supervisor has 3 registered transforms, of the same type
+    // Supervisor has 2 registered transforms
     add_copro<identity_coprocessor>(1234, {{"foo", l}}).get();
-    add_copro<identity_coprocessor>(121, {{"foo", l}}).get();
     add_copro<identity_coprocessor>(321, {{"bar", l}}).get();
     // Storage has 5 ntps, 4 of topic 'foo' and 1 of 'bar'
     startup({{make_ts("foo"), 4}, {make_ts("bar"), 1}}, client)
@@ -80,20 +79,21 @@ FIXTURE_TEST(test_coproc_router_simple, router_test_fixture) {
       model::partition_id(0));
 
     auto batches = storage::test::make_random_batches(
-      model::offset(0), 4, false);
-    const auto pre_batch_size = sum_records(batches) * 2;
+      model::offset(0), 40, false);
+    auto input_copy = copy_batch(batches);
+    const std::size_t n_records = sum_records(batches);
 
     using namespace std::literals;
-    auto f1 = push(
-      input_ntp, model::make_memory_record_batch_reader(std::move(batches)));
-    auto f2 = drain(
-      output_ntp, pre_batch_size, model::timeout_clock::now() + 5s);
+    push(input_ntp, model::make_memory_record_batch_reader(std::move(batches)))
+      .get();
     auto read_batches
-      = ss::when_all_succeed(std::move(f1), std::move(f2)).get();
-
-    BOOST_REQUIRE(std::get<1>(read_batches).has_value());
-    const model::record_batch_reader::data_t& data = *std::get<1>(read_batches);
-    BOOST_CHECK_EQUAL(sum_records(data), pre_batch_size);
+      = drain(output_ntp, n_records, model::timeout_clock::now() + 10s).get();
+    /// Check for total equality
+    BOOST_CHECK(read_batches.has_value());
+    BOOST_CHECK_EQUAL(n_records, sum_records(*read_batches));
+    /// TODO(rob) Verify that both batches are totally equal, maybe by hashing
+    /// both and comparing the values
+    // BOOST_CHECK_EQUAL(input_copy, *read_batches);
 }
 
 FIXTURE_TEST(test_coproc_router_multi_route, router_test_fixture) {
