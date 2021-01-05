@@ -13,6 +13,7 @@
 #include "rpc/errc.h"
 #include "rpc/logger.h"
 #include "rpc/transport.h"
+#include "rpc/types.h"
 
 #include <seastar/net/inet_address.hh>
 
@@ -29,6 +30,15 @@ static inline bool has_backoff_expired(
         return false;
     }
     return now >= (stamp + backoff);
+}
+
+rpc::clock_type::duration
+reconnect_transport::next_expected_backoff_duration() {
+    auto backoff = _backoff_policy.current_backoff_duration();
+    if (has_backoff_expired(_stamp, backoff)) {
+        return rpc::clock_type::duration::zero();
+    }
+    return (_stamp + backoff) - rpc::clock_type::now();
 }
 
 ss::future<> reconnect_transport::stop() {

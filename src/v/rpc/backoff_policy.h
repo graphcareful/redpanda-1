@@ -27,7 +27,7 @@ public:
     struct impl {
         virtual void next_backoff() = 0;
 
-        virtual std::chrono::milliseconds current_backoff_duration() = 0;
+        virtual std::chrono::milliseconds current_backoff_duration() const = 0;
 
         virtual void reset() = 0;
 
@@ -39,7 +39,7 @@ public:
 
     void next_backoff() { _impl->next_backoff(); }
 
-    std::chrono::milliseconds current_backoff_duration() {
+    std::chrono::milliseconds current_backoff_duration() const {
         return _impl->current_backoff_duration();
     };
 
@@ -65,7 +65,7 @@ backoff_policy make_exponential_backoff_policy(
           : _base_duration(base)
           , _max_backoff(max) {}
 
-        std::chrono::milliseconds current_backoff_duration() final {
+        std::chrono::milliseconds current_backoff_duration() const final {
             return _current * _base_duration;
         }
 

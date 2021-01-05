@@ -44,6 +44,8 @@ public:
 
     ss::future<> stop();
 
+    rpc::clock_type::duration next_expected_backoff_duration();
+
 private:
     rpc::transport _transport;
     rpc::clock_type::time_point _stamp{rpc::clock_type::now()};
