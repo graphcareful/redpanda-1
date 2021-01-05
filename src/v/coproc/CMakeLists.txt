@@ -25,6 +25,7 @@ v_cc_library(
     router_source_manager.cc
     pacemaker_context.cc
     script_context.cc
+    pacemaker.cc
   DEPS
     v::rpc
     v::model
