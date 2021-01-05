@@ -17,12 +17,13 @@ rpcgen(
 v_cc_library(
   NAME coproc
   SRCS
+    utils.cc
     types.cc
     logger.cc
     service.cc
     router.cc
     router_source_manager.cc
-    utils.cc
+    pacemaker_context.cc
   DEPS
     v::rpc
     v::model
