@@ -613,6 +613,18 @@ void application::start() {
     vlog(
       _log.info, "Started Kafka API server listening at {}", conf.kafka_api());
 
+    /// Start client listening for events on the internal coprocessor topic
+    if (coproc_enabled()) {
+        /// Temporarily disable retries for the new client until we create a
+        /// more granular way to configure this per client or per request.
+        kafka::client::shard_local_cfg().retries.set_value(size_t(0));
+        construct_single_service(
+          _wasm_event_listener,
+          std::filesystem::path(
+            config::shard_local_cfg().coproc_script_directory.value()));
+        _wasm_event_listener->start();
+    }
+
     vlog(_log.info, "Successfully started Redpanda!");
     syschecks::systemd_notify_ready().get();
 }
