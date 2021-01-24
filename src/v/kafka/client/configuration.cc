@@ -33,7 +33,7 @@ configuration::configuration()
       "retries",
       "Number of times to retry a request to a broker",
       config::required::no,
-      5)
+      0)
   , retry_base_backoff(
       *this,
       "retry_base_backoff_ms",
