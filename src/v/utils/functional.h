@@ -57,6 +57,10 @@ struct push_back_opt {
 } // namespace reduce
 
 namespace xform {
+template<typename T>
+struct just {
+    T operator()(T&& v) const noexcept { return std::forward<T>(v); }
+};
 
 template<typename T>
 struct equal_to {
