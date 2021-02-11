@@ -8,6 +8,7 @@ v_cc_library(
     "utils/coproc_test_fixture.h"
     "utils/router_test_fixture.h"
   SRCS
+    utils/event_publisher.cc
     utils/supervisor.cc
     utils/coproc_test_fixture.cc
     utils/router_test_fixture.cc
