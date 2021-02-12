@@ -55,7 +55,7 @@ struct event {
 /// \brief Generates an event that models the 'wasm_event' struct passed in. Any
 /// optional fields aren't serialized into the resultant record, useful for
 /// testing failure cases against malformatted record events
-model::record make_record(const event&);
+model::record make_record(const event&, bool compress = false);
 
 /// \brief Returns a record batch reader that generates random valid wasm_events
 /// @param offset offset to start at

@@ -14,6 +14,7 @@
 #include "bytes/iobuf.h"
 #include "coproc/wasm_event.h"
 #include "hashing/secure.h"
+#include "model/record.h"
 #include "model/record_batch_reader.h"
 #include "raft/types.h"
 #include "random/generators.h"
@@ -89,13 +90,22 @@ bytes calculate_checksum(const event& e) {
     return bytes(checksum.begin(), checksum.end());
 }
 
+void randomly_compress_batch(model::record_batch_header& h) {
+    bool compress = random_generators::get_int(0, 1);
+    h.attrs = model::record_batch_attributes(
+      random_generators::get_int<int16_t>(0, compress ? 4 : 0));
+}
+
 /// Don't call this in a loop, rather use 'make_random_wasm_batch' or
 /// 'make_wasm_batch'. This method is only useful for situations where a single
 /// model::record with exact fields must be serialized
-model::record make_record(const event& e) {
+model::record make_record(const event& e, bool compress) {
     storage::record_batch_builder rbb(raft::data_batch_type, model::offset(0));
     serialize_event(rbb, e);
     auto record_batch = std::move(rbb).build();
+    if (compress) {
+        randomly_compress_batch(record_batch.header());
+    }
     vassert(
       record_batch.header().record_count == 1, "Only one record expected");
     return std::move(record_batch.copy_records()[0]);
@@ -118,6 +128,7 @@ model::record_batch_reader make_random_event_record_batch_reader(
             serialize_event(rbb, e);
         }
         batches.push_back(std::move(rbb).build());
+        randomly_compress_batch(batches.back().header());
         o = batches.back().last_offset() + model::offset(1);
     }
     return model::make_memory_record_batch_reader(std::move(batches));
@@ -134,6 +145,7 @@ make_event_record_batch_reader(std::vector<std::vector<event>> event_batches) {
             serialize_event(rbb, e);
         }
         batches.push_back(std::move(rbb).build());
+        randomly_compress_batch(batches.back().header());
         o = batches.back().last_offset() + model::offset(1);
     }
     return model::make_memory_record_batch_reader(std::move(batches));

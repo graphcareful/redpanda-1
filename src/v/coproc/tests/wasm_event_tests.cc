@@ -12,6 +12,7 @@
 #include "coproc/tests/utils/coprocessor.h"
 #include "model/record_batch_reader.h"
 #include "model/timeout_clock.h"
+#include "storage/parser_utils.h"
 
 #include <seastar/testing/thread_test_case.hh>
 
@@ -23,19 +24,40 @@
 #include "coproc/tests/utils/wasm_event_generator.h"
 #include "random/generators.h"
 
+#include <seastar/core/loop.hh>
+
 #include <boost/test/unit_test.hpp>
 
 #include <optional>
 
 using cp_errc = coproc::wasm::errc;
 
+class record_batch_decompressor {
+public:
+    ss::future<ss::stop_iteration> operator()(model::record_batch b) {
+        return storage::internal::decompress_batch(std::move(b))
+          .then([this](model::record_batch rb) {
+              _result.push_back(std::move(rb));
+              return ss::stop_iteration::no;
+          });
+    }
+
+    model::record_batch_reader::data_t end_of_stream() {
+        return std::move(_result);
+    }
+
+private:
+    model::record_batch_reader::data_t _result;
+};
+
 SEASTAR_THREAD_TEST_CASE(verify_make_event) {
     /// The generator only creates valid events by default
     auto rbr = coproc::wasm::make_random_event_record_batch_reader(
       model::offset(0), 5, 5);
-    auto batches = model::consume_reader_to_memory(
-                     std::move(rbr), model::no_timeout)
+    auto batches = std::move(rbr)
+                     .consume(record_batch_decompressor{}, model::no_timeout)
                      .get0();
+
     for (auto& record_batch : batches) {
         record_batch.for_each_record([](model::record r) {
             BOOST_CHECK_EQUAL(cp_errc::none, coproc::wasm::validate_event(r));
@@ -87,8 +109,8 @@ SEASTAR_THREAD_TEST_CASE(verify_event_reconciliation) {
       {{789, deploy}, {123}}};
 
     auto rbr = make_event_record_batch_reader(std::move(events));
-    auto batches = model::consume_reader_to_memory(
-                     std::move(rbr), model::no_timeout)
+    auto batches = std::move(rbr)
+                     .consume(record_batch_decompressor{}, model::no_timeout)
                      .get0();
 
     auto results = coproc::wasm::reconcile_events(
