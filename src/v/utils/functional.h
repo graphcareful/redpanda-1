@@ -25,6 +25,14 @@ concept SupportsPushBack = requires(T a, U b) {
 // clang-format on
 
 namespace reduce {
+struct merge {
+    template<typename SetLike>
+    SetLike operator()(SetLike a, SetLike b) const {
+        a.merge(std::move(b));
+        return a;
+    }
+};
+
 struct push_back {
     template<typename VecLike>
     CONCEPT(requires SupportsPushBack<VecLike>)
@@ -49,9 +57,6 @@ struct push_back_opt {
 } // namespace reduce
 
 namespace xform {
-struct logical_true {
-    bool operator()(bool v) const noexcept { return v; }
-};
 
 template<typename T>
 struct equal_to {
@@ -68,4 +73,5 @@ struct not_equal_to {
     bool operator()(const T& other) const { return _value != other; }
     T _value;
 };
+
 } // namespace xform
