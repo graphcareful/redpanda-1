@@ -33,7 +33,7 @@ namespace coproc {
  * reads data from its interested topics, sends to the wasm engine, and
  * processes the response (almost always a write to a materialized log)
  */
-class pacemaker {
+class pacemaker : public ss::peering_sharded_service<pacemaker> {
 public:
     /**
      * class constructor
@@ -87,6 +87,8 @@ public:
     shared_script_resources& resources() { return _shared_res; }
 
 private:
+    void script_failed_handler(script_id, std::exception_ptr);
+
     void do_add_source(
       script_id,
       ntp_context_cache&,
