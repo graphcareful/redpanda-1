@@ -28,6 +28,7 @@
 #include <absl/container/flat_hash_set.h>
 
 #include <algorithm>
+#include <exception>
 
 namespace coproc {
 
@@ -112,7 +113,25 @@ std::vector<errc> pacemaker::add_source(
       id, _shared_res, std::move(ctxs));
     const auto [itr, success] = _scripts.emplace(id, std::move(script_ctx));
     vassert(success, "Double coproc insert detected");
-    (void)itr->second->start();
+    vlog(coproclog.debug, "Adding source with id: {}", id);
+    (void)itr->second->start().handle_exception(
+      [this, id](std::exception_ptr eptr) {
+          try {
+              std::rethrow_exception(eptr);
+          } catch (const script_failed_exception& e) {
+              vlog(
+                coproclog.error,
+                "Handling script_failed_exception: {}",
+                e.what());
+              (void)ss::with_gate(_offs.gate, [this, id] {
+                  return container().invoke_on_all([id](pacemaker& p) {
+                      return p.remove_source(id).discard_result();
+                  });
+              });
+          } catch (...) {
+              vlog(coproclog.error, "Unexpected exception encountered");
+          }
+      });
     return acks;
 }
 
@@ -165,6 +184,7 @@ void pacemaker::do_add_source(
 }
 
 ss::future<errc> pacemaker::remove_source(script_id id) {
+    vlog(coproclog.debug, "Removing source with id: {}", id);
     auto handle = _scripts.extract(id);
     if (handle.empty()) {
         co_return errc::script_id_does_not_exist;

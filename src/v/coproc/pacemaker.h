@@ -33,7 +33,7 @@ namespace coproc {
  * reads data from its interested topics, sends to the wasm engine, and
  * processes the response (almost always a write to a materialized log)
  */
-class pacemaker {
+class pacemaker : public ss::peering_sharded_service<pacemaker> {
 public:
     /**
      * class constructor
