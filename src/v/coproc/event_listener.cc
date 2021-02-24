@@ -58,6 +58,11 @@ ss::future<> event_listener::stop() {
     return _gate.close().then([this] { return _client.stop(); });
 }
 
+static ss::future<> remove_copro_state(ss::sharded<pacemaker>& svc) {
+    return svc.invoke_on_all(
+      [](pacemaker& p) { return p.remove_all_sources().discard_result(); });
+}
+
 ss::future<>
 event_listener::persist_actions(absl::btree_map<script_id, iobuf> wsas) {
     std::vector<enable_copros_request::data> enables;
@@ -96,6 +101,7 @@ event_listener::persist_actions(absl::btree_map<script_id, iobuf> wsas) {
 
 event_listener::event_listener(ss::sharded<pacemaker>& pacemaker)
   : _client(make_client())
+  , _pacemaker(pacemaker)
   , _dispatcher(pacemaker, _abort_source) {}
 
 ss::future<> event_listener::start() {
@@ -104,7 +110,7 @@ ss::future<> event_listener::start() {
           [this] { return _abort_source.abort_requested(); },
           [this] {
               return do_start().then([this] {
-                  return ss::sleep_abortable(2s, _abort_source)
+                  return ss::sleep_abortable(1s, _abort_source)
                     .handle_exception_type([](const ss::sleep_aborted&) {});
               });
           });
@@ -123,18 +129,47 @@ decompress_wasm_events(model::record_batch_reader::data_t events) {
 
 ss::future<> event_listener::do_start() {
     bool connected = co_await _client.is_connected();
-    if (connected) {
-        co_await do_ingest();
-    } else {
+    if (!connected) {
         try {
+            /// Connect may throw if it cannot establish a connection within the
+            /// pre-defined global retry policy
             co_await _client.connect();
         } catch (const kafka::client::broker_error& e) {
             vlog(
               coproclog.warn,
               "Failed to connect to a broker within the retry policy: {}",
               e);
+            co_return;
         }
     }
+    bool heartbeat = co_await _dispatcher.heartbeat();
+    if (!heartbeat) {
+        vlog(
+          coproclog.error,
+          "Wasm engine failed to reply to heartbeat within the "
+          "expected "
+          "interval");
+        _last_heartbeat_failed = true;
+        bool has_active = co_await _pacemaker.map_reduce0(
+          [](pacemaker& p) { return p.n_registered_scripts(); },
+          bool(false),
+          std::logical_or<>());
+        if (has_active) {
+            vlog(
+              coproclog.info, "Shutting down all coprocessor script_contexts");
+            co_await remove_copro_state(_pacemaker);
+        }
+        co_return;
+    }
+    /// If the wasm engine has awaken from restart, reset all state
+    /// within the wasm engine, and set the offset to 0 to begin
+    /// reconciling scripts
+    if (heartbeat && _last_heartbeat_failed) {
+        co_await _dispatcher.disable_all_coprocessors();
+        _offset = model::offset(0);
+        _last_heartbeat_failed = false;
+    }
+    co_await do_ingest();
 }
 
 ss::future<> event_listener::do_ingest() {

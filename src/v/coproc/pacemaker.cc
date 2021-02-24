@@ -72,6 +72,9 @@ ss::future<> pacemaker::start() {
 }
 
 ss::future<> pacemaker::stop() {
+    if (_offs.gate.is_closed()) {
+        co_return;
+    }
     /// First shutdown the offset keepers loop
     _offs.timer.cancel();
     std::vector<script_id> ids;
