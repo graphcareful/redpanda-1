@@ -162,8 +162,8 @@ ss::future<> script_dispatcher::enable_coprocessors(enable_copros_request req) {
     auto reply = co_await client->enable_coprocessors(
       std::move(req), rpc::client_opts(model::no_timeout));
     if (!reply) {
-        vlog(coproclog.error, "Could not complete enable_coprocessors request");
-        co_return;
+        throw std::runtime_error(fmt::format(
+          "Failed to complete request to wasm engine: {}", reply.error()));
     }
     std::vector<script_id> deregisters;
     for (enable_copros_reply::data& r : reply.value().data.acks) {
@@ -225,10 +225,10 @@ ss::future<> script_dispatcher::enable_coprocessors(enable_copros_request req) {
           disable_copros_request{.ids = std::move(deregisters)},
           rpc::client_opts(model::no_timeout));
         if (!reply) {
-            vlog(
-              coproclog.error,
+            throw std::runtime_error(fmt::format(
               "Failed to deregister scripts for which had topics that didn't "
-              "already exist");
+              "already exist: {}",
+              reply.error()));
         }
     }
 }
@@ -247,9 +247,8 @@ script_dispatcher::disable_coprocessors(disable_copros_request req) {
     auto reply = co_await client->disable_coprocessors(
       std::move(req), rpc::client_opts(model::no_timeout));
     if (!reply) {
-        vlog(
-          coproclog.error, "Could not complete disable_coprocessors request");
-        co_return;
+        throw std::runtime_error(fmt::format(
+          "Failed to complete request to wasm engine: {}", reply.error()));
     }
     for (const auto& [id, code] : reply.value().data.acks) {
         if (code != disable_response_code::success) {
@@ -286,10 +285,8 @@ ss::future<> script_dispatcher::disable_all_coprocessors() {
     auto reply = co_await client->disable_all_coprocessors(
       empty_request(), rpc::client_opts(model::no_timeout));
     if (!reply) {
-        vlog(
-          coproclog.error,
-          "Could not complete disable_all_coprocessors request");
-        co_return;
+        throw std::runtime_error(fmt::format(
+          "Failed to complete request to wasm engine: {}", reply.error()));
     }
     error_cnt cnt = std::accumulate(
       reply.value().data.acks.cbegin(),
