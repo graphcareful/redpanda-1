@@ -74,28 +74,13 @@ ss::future<> pacemaker::start() {
 }
 
 ss::future<> pacemaker::stop() {
-    if (_offs.gate.is_closed()) {
+    if (_gate.is_closed()) {
         co_return;
     }
     /// First shutdown the offset keepers loop
     _offs.timer.cancel();
-    std::vector<script_id> ids;
-    ids.reserve(_scripts.size());
-    for (const auto& [id, _] : _scripts) {
-        ids.push_back(id);
-    }
-    /// Next de-register all coprocessors
-    bool success = true;
-    for (const script_id& id : ids) {
-        success = co_await remove_source(id) == errc::success;
-        if (!success) {
-            break;
-        }
-    }
+    co_await remove_all_sources();
     co_await _gate.close();
-    if (!success) {
-        vlog(coproclog.error, "Failed to gracefully shutdown all copro fibers");
-    }
     /// Finally close the connection to the wasm engine
     vlog(coproclog.info, "Closing connection to coproc wasm engine");
     co_await _shared_res.transport.stop();
@@ -210,6 +195,25 @@ ss::future<errc> pacemaker::remove_source(script_id id) {
         return p.second.use_count() == 1;
     });
     co_return errc::success;
+}
+
+ss::future<absl::btree_map<script_id, errc>> pacemaker::remove_all_sources() {
+    std::vector<script_id> ids;
+    ids.reserve(_scripts.size());
+    for (const auto& [id, _] : _scripts) {
+        ids.push_back(id);
+    }
+    absl::btree_map<script_id, errc> results_map;
+    bool success = true;
+    for (const script_id& id : ids) {
+        errc result = co_await remove_source(id);
+        results_map.emplace(id, result);
+        success &= (result == errc::success);
+    }
+    if (!success) {
+        vlog(coproclog.error, "Failed to gracefully shutdown all copro fibers");
+    }
+    co_return results_map;
 }
 
 bool pacemaker::local_script_id_exists(script_id id) {
