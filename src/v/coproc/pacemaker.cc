@@ -68,7 +68,9 @@ ss::future<> pacemaker::start() {
     co_await ss::recursive_touch_directory(offsets_snapshot_path().string());
     auto ncc = co_await recover_offsets(_offs.snap, _shared_res.api.log_mgr());
     _ntps = std::move(ncc);
-    _offs.timer.arm(_offs.duration);
+    if (!_offs.timer.armed()) {
+        _offs.timer.arm(_offs.duration);
+    }
 }
 
 ss::future<> pacemaker::stop() {
