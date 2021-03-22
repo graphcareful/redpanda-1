@@ -151,7 +151,8 @@ class WasmTest(RedpandaTest):
         def all_done():
             output_totals = output_consumer.results.num_records()
             input_totals = input_consumer.results.num_records()
-            return output_totals >= total_outputs and input_totals >= total_inputs
+            return output_totals >= total_outputs \
+                and input_totals >= total_inputs
 
         timeout, backoff = self.wasm_test_timeout()
         wait_until(all_done, timeout_sec=timeout, backoff_sec=backoff)
@@ -165,6 +166,9 @@ class WasmTest(RedpandaTest):
         raise Exception('Expected to be implemented by subclass')
 
     def wasm_test_timeout(self):
+        """
+        2-tuple representing timeout(0) and backoff interval(1)
+        """
         return (30, 1)
 
     @cluster(num_nodes=6)
