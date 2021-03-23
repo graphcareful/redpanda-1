@@ -10,6 +10,7 @@
 from rptest.wasm.wasm_test import WasmTest, WasmScript
 from rptest.wasm.wasm_build_tool import WasmTemplateRepository
 from rptest.wasm.topic import construct_materialized_topic
+from rptest.wasm.topics_result_set import materialized_result_set_compare
 
 from rptest.clients.types import TopicSpec
 
@@ -45,7 +46,7 @@ class WasmBasicTest(WasmTest):
         # Read all of the data from the materialized topic, expecting the same
         # number of records which were produced onto the input topic
         assert input_results.num_records() == self._num_records
-        if input_results != output_results:
+        if not materialized_result_set_compare(input_results, output_results):
             raise Exception(
                 "Expected all records across topics to be equivalent")
 
