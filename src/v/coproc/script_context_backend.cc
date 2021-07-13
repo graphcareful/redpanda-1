@@ -1,0 +1,179 @@
+/*
+ * Copyright 2021 Vectorized, Inc.
+ *
+ * Use of this software is governed by the Business Source License
+ * included in the file licenses/BSL.md
+ *
+ * As of the Change Date specified in that file, in accordance with
+ * the Business Source License, use of this software will be governed
+ * by the Apache License, Version 2.0
+ */
+
+#include "script_context_backend.h"
+
+#include "coproc/logger.h"
+#include "coproc/reference_window_consumer.hpp"
+#include "storage/parser_utils.h"
+#include "vlog.h"
+
+#include <seastar/core/coroutine.hh>
+
+namespace coproc {
+/// Sets all of the term_ids in a batch of record batches to be a newly
+/// desired term.
+class term_id_updater {
+public:
+    explicit term_id_updater(model::term_id tid)
+      : _tid(tid) {}
+
+    ss::future<ss::stop_iteration> operator()(model::record_batch& rb) {
+        auto nh = rb.header();
+        nh.ctx.term = _tid;
+        _batches.push_back(
+          model::record_batch(nh, std::move(rb).release_data()));
+        co_return ss::stop_iteration::no;
+    }
+
+    model::record_batch_reader end_of_stream() {
+        return model::make_memory_record_batch_reader(std::move(_batches));
+    }
+
+private:
+    model::term_id _tid{};
+    model::record_batch_reader::data_t _batches;
+};
+
+static ss::future<bool> do_write_materialized_partition(
+  storage::log log,
+  model::term_id highest_term,
+  model::record_batch_reader reader) {
+    /// Set all of the term_ids in each record to match the term of the source
+    /// topic. Blindly copying the term that exists is incorrect as it could
+    /// cause storage to crash in the event a coprocessor reorders
+    /// record_batches potentially making a batch with a lower term appear after
+    /// one with a larger term.
+    model::term_id materialized_term = log.offsets().dirty_offset_term;
+    /// In the case two coprocessors are writing to the same topics a
+    /// lower term may be observed depending on where exactly in the input
+    /// log each coprocessor is. To avoid this if detected, just use the
+    /// current materialized logs term
+    model::term_id new_term = highest_term < materialized_term
+                                ? materialized_term
+                                : highest_term;
+    auto [crc_success, rbr] = co_await std::move(reader).for_each_ref(
+      coproc::reference_window_consumer(
+        model::record_batch_crc_checker(), term_id_updater(new_term)),
+      model::no_timeout);
+    if (!crc_success) {
+        co_return false;
+    }
+    auto nrbr = co_await std::move(rbr).for_each_ref(
+      storage::internal::compress_batch_consumer(model::compression::zstd, 512),
+      model::no_timeout);
+
+    const storage::log_append_config write_cfg{
+      .should_fsync = storage::log_append_config::fsync::no,
+      .io_priority = ss::default_priority_class(),
+      .timeout = model::no_timeout};
+    co_await std::move(nrbr).for_each_ref(
+      log.make_appender(write_cfg), model::no_timeout);
+    co_return true;
+}
+
+static ss::future<storage::log>
+get_log(storage::log_manager& log_mgr, model::ntp ntp) {
+    auto found = log_mgr.get(ntp);
+    if (found) {
+        return ss::make_ready_future<storage::log>(*found);
+    }
+    vlog(coproclog.info, "Making new log: {}", ntp);
+    return log_mgr.manage(storage::ntp_config(ntp, log_mgr.config().base_dir));
+}
+
+static ss::future<bool> write_materialized_partition(
+  model::ntp ntp,
+  model::term_id highest_term,
+  model::record_batch_reader reader,
+  output_write_args args) {
+    auto found = args.locks.find(ntp);
+    if (found == args.locks.end()) {
+        found = args.locks.emplace(ntp, mutex()).first;
+    }
+    /// NOTE: Converting this to a coroutine causes a guaranteed crash even with
+    /// clang.. why?
+    return found->second.with(
+      [ntp, highest_term, args, reader = std::move(reader)]() mutable {
+          return get_log(args.log_manager, ntp)
+            .then([highest_term, ntp, reader = std::move(reader)](
+                    storage::log log) mutable {
+                return do_write_materialized_partition(
+                  std::move(log), highest_term, std::move(reader));
+            });
+      });
+}
+
+static ss::future<>
+process_one_reply(process_batch_reply::data e, output_write_args args) {
+    /// Ensure this 'script_context' instance is handling the correct reply
+    if (e.id != args.id()) {
+        /// TODO: Maybe in the future errors of these type should mean redpanda
+        /// kill -9's the wasm engine.
+        vlog(
+          coproclog.error,
+          "erranous reply from wasm engine, mismatched id observed, expected: "
+          "{} and observed {}",
+          args.id,
+          e.id);
+        co_return;
+    }
+    if (!e.reader) {
+        throw script_failed_exception(
+          e.id,
+          fmt::format(
+            "script id {} will auto deregister due to an internal syntax "
+            "error",
+            e.id));
+    }
+    /// Use the source topic portion of the materialized topic to perform a
+    /// lookup for the relevent 'ntp_context'
+    auto materialized_ntp = model::materialized_ntp(e.ntp);
+    auto found = args.inputs.find(materialized_ntp.source_ntp());
+    if (found == args.inputs.end()) {
+        vlog(
+          coproclog.warn,
+          "script {} unknown source ntp: {}",
+          args.id,
+          materialized_ntp.source_ntp());
+        co_return;
+    }
+    auto ntp_ctx = found->second;
+    model::term_id highest_term = ntp_ctx->partition->term();
+    auto success = co_await write_materialized_partition(
+      materialized_ntp.input_ntp(), highest_term, std::move(*e.reader), args);
+    if (!success) {
+        vlog(coproclog.warn, "record_batch failed to pass crc checks");
+        co_return;
+    }
+    auto ofound = ntp_ctx->offsets.find(args.id);
+    vassert(
+      ofound != ntp_ctx->offsets.end(),
+      "Offset not found for script id {} for ntp owning context: {}",
+      args.id,
+      ntp_ctx->ntp());
+    /// Reset the acked offset so that progress can be made
+    ofound->second.last_acked = ofound->second.last_read;
+}
+
+ss::future<>
+write_materialized(output_write_inputs replies, output_write_args args) {
+    if (replies.empty()) {
+        vlog(
+          coproclog.error, "Wasm engine interpreted the request as erraneous");
+    } else {
+        for (auto& e : replies) {
+            co_await process_one_reply(std::move(e), args);
+        }
+    }
+}
+
+} // namespace coproc
