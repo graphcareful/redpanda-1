@@ -45,6 +45,7 @@ static constexpr std::string_view topic_property_retention_bytes
   = "retention.bytes";
 static constexpr std::string_view topic_property_retention_duration
   = "retention.ms";
+static constexpr std::string_view topic_property_topic_type = "topic.type";
 
 /// \brief Type representing Kafka protocol response from
 /// CreateTopics, DeleteTopics and CreatePartitions requests

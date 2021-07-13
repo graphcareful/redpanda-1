@@ -32,12 +32,13 @@
 
 namespace kafka {
 
-static constexpr std::array<std::string_view, 7> supported_configs{
+static constexpr std::array<std::string_view, 8> supported_configs{
   {"compression.type",
    "cleanup.policy",
    "message.timestamp.type",
    "segment.bytes",
    "compaction.strategy",
+   "materialized",
    "retention.bytes",
    "retention.ms"}};
 
