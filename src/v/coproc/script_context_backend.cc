@@ -117,19 +117,15 @@ process_one_reply(process_batch_reply::data e, output_write_args args) {
     }
     /// Use the source topic portion of the materialized topic to perform a
     /// lookup for the relevent 'ntp_context'
-    auto materialized_ntp = model::materialized_ntp(e.ntp);
-    auto found = args.inputs.find(materialized_ntp.source_ntp());
+    auto found = args.inputs.find(e.ntp);
     if (found == args.inputs.end()) {
         vlog(
-          coproclog.warn,
-          "script {} unknown source ntp: {}",
-          args.id,
-          materialized_ntp.source_ntp());
+          coproclog.warn, "script {} unknown source ntp: {}", args.id, e.ntp);
         co_return;
     }
     auto ntp_ctx = found->second;
     auto success = co_await write_materialized_partition(
-      materialized_ntp, std::move(*e.reader), args);
+      e.ntp, std::move(*e.reader), args);
     if (!success) {
         vlog(coproclog.warn, "record_batch failed to pass crc checks");
         co_return;
