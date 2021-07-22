@@ -277,6 +277,32 @@ topic_table::apply(update_topic_properties_cmd cmd, model::offset o) {
     co_return make_error_code(errc::success);
 }
 
+ss::future<std::error_code>
+topic_table::apply(create_materialized_topic_cmd cmd, model::offset o) {
+    if (_topics.contains(cmd.key)) {
+        co_return make_error_code(errc::topic_already_exists);
+    }
+    auto tp = _topics.find(cmd.value);
+    if (tp == _topics.end()) {
+        /// Source topic must exist if attempting to create a materialized topic
+        co_return make_error_code(errc::topic_invalid_config);
+    }
+
+    for (auto& pas : tp->second.configuration.assignments) {
+        auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, pas.id);
+        cluster::partition_assignment new_pas{
+          .group = pas.group, .id = pas.id, .replicas = {}};
+        _pending_deltas.emplace_back(
+          std::move(ntp), std::move(new_pas), o, delta::op_type::add);
+    }
+
+    auto tpa = tp->second;
+    tpa.configuration.cfg.properties.source_topic = cmd.key.tp();
+    _topics.insert({cmd.key, std::move(tpa)});
+    notify_waiters();
+    co_return make_error_code(errc::success);
+}
+
 void topic_table::notify_waiters() {
     if (_waiters.empty()) {
         return;
