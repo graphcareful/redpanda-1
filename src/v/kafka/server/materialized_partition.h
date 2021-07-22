@@ -16,9 +16,11 @@
 namespace kafka {
 class materialized_partition final : public kafka::partition_proxy::impl {
 public:
-    explicit materialized_partition(storage::log log)
+    explicit materialized_partition(
+      storage::log log, ss::lw_shared_ptr<cluster::partition> p)
       : _log(log)
-      , _probe(cluster::make_materialized_partition_probe()) {}
+      , _probe(cluster::make_materialized_partition_probe())
+      , _partition(p) {}
 
     const model::ntp& ntp() const final { return _log.config().ntp(); }
     model::offset start_offset() const final {
@@ -63,6 +65,7 @@ private:
 
     storage::log _log;
     cluster::partition_probe _probe;
+    ss::lw_shared_ptr<cluster::partition> _partition;
 };
 
 } // namespace kafka

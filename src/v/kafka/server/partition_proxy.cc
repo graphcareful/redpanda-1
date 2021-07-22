@@ -18,13 +18,25 @@
 namespace kafka {
 
 std::optional<partition_proxy> make_partition_proxy(
-  const model::ntp&,
-  ss::lw_shared_ptr<cluster::partition> partition,
-  cluster::partition_manager&) {
-    /// Render materialized_partition unused in this commit only. In a
-    /// subsequent commit a new method will be used to decide weather a
-    /// partition_proxy is materialized or not
-    return make_partition_proxy<replicated_partition>(partition);
+  const model::ntp& ntp,
+  cluster::metadata_cache& md_cache,
+  cluster::partition_manager& pm) {
+    auto log = pm.get(ntp);
+    if (log) {
+        return make_partition_proxy<replicated_partition>(log);
+    }
+    auto mts = md_cache.get_materialized_status(
+      model::topic_namespace_view{ntp});
+    if (!mts) {
+        return std::nullopt;
+    }
+    auto source_ntp = model::ntp(ntp.ns, *mts, ntp.tp.partition);
+    auto src_log = pm.get(source_ntp);
+    vassert(src_log, "Materialized topic must have an associated source");
+    auto materialized_log = pm.log(ntp);
+    vassert(materialized_log, "log should exist for materialized partition");
+    return make_partition_proxy<materialized_partition>(
+      *materialized_log, src_log);
 }
 
 } // namespace kafka
