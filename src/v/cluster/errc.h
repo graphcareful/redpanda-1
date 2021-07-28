@@ -46,8 +46,8 @@ enum class errc : int16_t {
     invalid_configuration_update,
     topic_operation_error,
     no_eligible_allocation_nodes,
-    allocation_error
-
+    allocation_error,
+    invalid_delete_topic_request
 };
 struct errc_category final : public std::error_category {
     const char* name() const noexcept final { return "cluster::errc"; }
@@ -125,6 +125,8 @@ struct errc_category final : public std::error_category {
                    "constrains were solved";
         case errc::allocation_error:
             return "Exception was thrown when allocating partitions ";
+        case errc::invalid_delete_topic_request:
+            return "Requested to delete a materialized topic is invalid";
         }
         return "cluster::errc::unknown";
     }
