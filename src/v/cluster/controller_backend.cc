@@ -876,23 +876,29 @@ ss::future<std::error_code> controller_backend::create_partition(
     }
 
     auto f = ss::now();
-    // handle partially created topic
-    auto partition = _partition_manager.local().get(ntp);
-    // no partition exists, create one
-    if (likely(!partition)) {
-        // we use offset as an rev as it is always increasing and it
-        // increases while ntp is being created again
-        f = _partition_manager.local()
-              .manage(
-                cfg->make_ntp_config(_data_directory, ntp.tp.partition, rev),
-                group_id,
-                std::move(members))
-              .discard_result();
-    } else {
-        // old partition still exists, wait for it to be removed
-        if (partition->get_revision_id() < rev) {
-            return ss::make_ready_future<std::error_code>(
-              errc::partition_already_exists);
+
+    // If this is a materialized topic, omit entering it into the
+    // partition_manager table
+    if (!cfg->properties.source_topic) {
+        // handle partially created topic
+        auto partition = _partition_manager.local().get(ntp);
+        // no partition exists, create one
+        if (likely(!partition)) {
+            // we use offset as an rev as it is always increasing and it
+            // increases while ntp is being created again
+            f = _partition_manager.local()
+                  .manage(
+                    cfg->make_ntp_config(
+                      _data_directory, ntp.tp.partition, rev),
+                    group_id,
+                    std::move(members))
+                  .discard_result();
+        } else {
+            // old partition still exists, wait for it to be removed
+            if (partition->get_revision_id() < rev) {
+                return ss::make_ready_future<std::error_code>(
+                  errc::partition_already_exists);
+            }
         }
     }
 
