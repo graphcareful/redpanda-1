@@ -47,7 +47,11 @@ enum class errc : int16_t {
     topic_operation_error,
     no_eligible_allocation_nodes,
     allocation_error,
-    invalid_delete_topic_request
+    invalid_delete_topic_request,
+    partition_configuration_revision_not_updated,
+    partition_configuration_in_joint_mode,
+    partition_configuration_leader_config_not_committed,
+    partition_configuration_differs,
 };
 struct errc_category final : public std::error_category {
     const char* name() const noexcept final { return "cluster::errc"; }
@@ -127,6 +131,15 @@ struct errc_category final : public std::error_category {
             return "Exception was thrown when allocating partitions ";
         case errc::invalid_delete_topic_request:
             return "Requested to delete a materialized topic is invalid";
+        case errc::partition_configuration_revision_not_updated:
+            return "Partition configuration revision wasn't yet updated with "
+                   "operation revision";
+        case errc::partition_configuration_in_joint_mode:
+            return "Partition configuration still in joint consensus mode";
+        case errc::partition_configuration_leader_config_not_committed:
+            return "Partition configuration wasn't committed on the leader";
+        case errc::partition_configuration_differs:
+            return "Current and requested partition configuration differs";
         }
         return "cluster::errc::unknown";
     }
