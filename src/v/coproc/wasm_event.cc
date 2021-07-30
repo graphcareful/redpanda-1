@@ -150,6 +150,9 @@ absl::btree_map<script_id, log_event>
 reconcile_events(std::vector<model::record_batch> events) {
     absl::btree_map<script_id, log_event> wsas;
     for (auto& record_batch : events) {
+        if (record_batch.header().type != model::record_batch_type::raft_data) {
+            continue;
+        }
         record_batch.for_each_record([&wsas](model::record r) {
             log_event le;
             auto mb_error = wasm::parse_event(r, le);

@@ -64,75 +64,82 @@ ss::future<> event_listener::stop() {
     return _gate.close().then([this] { return _client.stop(); });
 }
 
-ss::future<> event_listener::persist_actions(
-  absl::btree_map<script_id, log_event> wsas, model::offset last_offset) {
-    std::vector<enable_copros_request::data> enables;
-    std::vector<script_id> disables;
-    for (auto& [id, event] : wsas) {
-        /// Keeping the active_ids cache up to date solves the issue of issuing
-        /// a bunch of remove commands for scripts that aren't deployed (this
-        /// could occur during bootstrapping)
-        auto found = _active_ids.find(id);
-        if (query_action(event.source_code) == event_action::remove) {
-            if (found != _active_ids.end()) {
-                disables.emplace_back(id);
-            }
-        } else {
-            /// ... or in the case if deploys are performed using the same key.
-            /// This would normally be resolved if the events came in the same
-            /// record batch by the reconcile events function, but not if they
-            /// arrived in separate batches.
-            if (found == _active_ids.end()) {
-                enables.emplace_back(enable_copros_request::data{
-                  .id = id, .source_code = std::move(event.source_code)});
-            }
-        }
-    }
-    /// TODO: In the future, maybe it would be cleaner to have a add/remove
-    /// endpoint, instead of two seperate RPC endpoints
-    if (!enables.empty()) {
-        enable_copros_request req{.inputs = std::move(enables)};
-        auto resp = co_await _dispatcher.enable_coprocessors(std::move(req));
-        if (resp.has_error()) {
-            vlog(
-              coproclog.error,
-              "Failed to register coprocessors with the wasm engine: {}",
-              resp.error());
-            _offset = last_offset;
-            co_return;
-        } else {
-            for (script_id id : resp.value()) {
-                vlog(
-                  coproclog.info,
-                  "Successfully registered script with id: {}",
-                  id);
-                _active_ids[id] = std::move(wsas[id].attrs);
-            }
-            co_await advertise_state_update();
-        }
-    }
-    if (!disables.empty()) {
-        disable_copros_request req{.ids = std::move(disables)};
-        auto resp = co_await _dispatcher.disable_coprocessors(std::move(req));
-        if (resp.has_error()) {
-            vlog(
-              coproclog.error,
-              "Failed to make disable request to the wasm engine: {}",
-              resp.error());
-            /// In this case the code will follow a path that re-enters this
-            /// method with the same inputs, and the call to enable_copros above
-            /// succeeded but the call to disable_coprocessors failed, double
-            /// registrations will be avoided because the ids have entered the
-            /// \ref active_ids cache and will not be queued for re-registration
-            _offset = last_offset;
-        } else {
-            for (script_id id : resp.value()) {
-                _active_ids.erase(id);
-            }
-            co_await advertise_state_update();
-        }
-    }
-}
+// ss::future<> event_listener::persist_actions(
+//   absl::btree_map<script_id, log_event> wsas, model::offset last_offset) {
+//     std::vector<enable_copros_request::data> enables;
+//     std::vector<script_id> disables;
+//     for (auto& [id, event] : wsas) {
+//         /// Keeping the active_ids cache up to date solves the issue of
+//         issuing
+//         /// a bunch of remove commands for scripts that aren't deployed (this
+//         /// could occur during bootstrapping)
+//         auto found = _active_ids.find(id);
+//         if (query_action(event.source_code) == event_action::remove) {
+//             if (found != _active_ids.end()) {
+//                 disables.emplace_back(id);
+//             }
+//         } else {
+//             /// ... or in the case if deploys are performed using the same
+//             key.
+//             /// This would normally be resolved if the events came in the
+//             same
+//             /// record batch by the reconcile events function, but not if
+//             they
+//             /// arrived in separate batches.
+//             if (found == _active_ids.end()) {
+//                 enables.emplace_back(enable_copros_request::data{
+//                   .id = id, .source_code = std::move(event.source_code)});
+//             }
+//         }
+//     }
+//     /// TODO: In the future, maybe it would be cleaner to have a add/remove
+//     /// endpoint, instead of two seperate RPC endpoints
+//     if (!enables.empty()) {
+//         enable_copros_request req{.inputs = std::move(enables)};
+//         auto resp = co_await _dispatcher.enable_coprocessors(std::move(req));
+//         if (resp.has_error()) {
+//             vlog(
+//               coproclog.error,
+//               "Failed to register coprocessors with the wasm engine: {}",
+//               resp.error());
+//             _offset = last_offset;
+//             co_return;
+//         } else {
+//             for (script_id id : resp.value()) {
+//                 vlog(
+//                   coproclog.info,
+//                   "Successfully registered script with id: {}",
+//                   id);
+//                 _active_ids[id] = std::move(wsas[id].attrs);
+//             }
+//             co_await advertise_state_update();
+//         }
+//     }
+//     if (!disables.empty()) {
+//         disable_copros_request req{.ids = std::move(disables)};
+//         auto resp = co_await
+//         _dispatcher.disable_coprocessors(std::move(req)); if
+//         (resp.has_error()) {
+//             vlog(
+//               coproclog.error,
+//               "Failed to make disable request to the wasm engine: {}",
+//               resp.error());
+//             /// In this case the code will follow a path that re-enters this
+//             /// method with the same inputs, and the call to enable_copros
+//             above
+//             /// succeeded but the call to disable_coprocessors failed, double
+//             /// registrations will be avoided because the ids have entered
+//             the
+//             /// \ref active_ids cache and will not be queued for
+//             re-registration _offset = last_offset;
+//         } else {
+//             for (script_id id : resp.value()) {
+//                 _active_ids.erase(id);
+//             }
+//             co_await advertise_state_update();
+//         }
+//     }
+// }
 
 event_listener::event_listener(ss::sharded<pacemaker>& pacemaker)
   : _client(make_client())
@@ -218,6 +225,7 @@ ss::future<> event_listener::boostrap_status_topic() {
       .replication_factor = 1,
       .configs{kafka::createable_topic_config{
         .name = "cleanup.policy", .value = "compact"}}};
+
     auto responses = co_await _client.create_topic(
       std::move(copro_status_topic));
     vassert(responses.data.topics.size() == 1, "more then expected responses");
@@ -246,7 +254,10 @@ ss::future<> event_listener::do_ingest() {
     }
     auto decompressed = co_await decompress_wasm_events(std::move(events));
     auto reconciled = wasm::reconcile_events(std::move(decompressed));
-    co_await persist_actions(std::move(reconciled), last_offset);
+    co_await _registry.invoke_on_all(
+      [reconciled = std::move(reconciled)](script_registry& r) {
+          r.process_events(reconciled);
+      });
 }
 
 ss::future<ss::stop_iteration>

@@ -80,6 +80,8 @@ private:
 
     /// Used to make requests to the wasm engine
     script_dispatcher _dispatcher;
+
+    ss::sharded<script_registry>& _registry;
 };
 
 } // namespace coproc::wasm
