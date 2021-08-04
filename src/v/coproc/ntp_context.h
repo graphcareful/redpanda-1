@@ -91,6 +91,9 @@ struct shared_script_resources {
     /// Reference to the storage layer for writing to materialized logs
     storage::api& api;
 
+    ss::sharded<cluster::topics_frontend>& frontend;
+    cluster::metadata_cache& cache;
+
     /// Reference to the partition manager, used to interface with
     /// cluster::partition
     cluster::partition_manager& pm;
@@ -103,12 +106,23 @@ struct shared_script_resources {
     /// to elements within the collection are used
     absl::node_hash_map<model::ntp, mutex> log_mtx;
 
-    explicit shared_script_resources(
+    /// Alerting mechanism that lets script_context_backend futures wait until a
+    /// materialized topic has been created. ss::shared_promise<> is used as
+    /// there may be many partitions for a topic that are waiting on the topics
+    /// creation
+    absl::node_hash_map<model::topic_namespace, ss::shared_promise<>>
+      topic_promises;
+
+    shared_script_resources(
       rpc::reconnect_transport t,
       storage::api& sapi,
+      ss::sharded<cluster::topics_frontend>& f,
+      cluster::metadata_cache& c,
       cluster::partition_manager& a)
       : transport(std::move(t))
       , api(sapi)
+      , frontend(f)
+      , cache(c)
       , pm(a) {}
 };
 

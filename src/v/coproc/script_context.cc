@@ -12,8 +12,8 @@
 #include "coproc/script_context.h"
 
 #include "coproc/logger.h"
-#include "coproc/script_context_frontend.h"
 #include "coproc/script_context_backend.h"
+#include "coproc/script_context_frontend.h"
 #include "coproc/types.h"
 #include "model/record_batch_reader.h"
 #include "model/timeout_clock.h"
@@ -114,11 +114,15 @@ ss::future<> script_context::send_request(
       .then([this](reply_t reply) {
           if (reply) {
               output_write_args args{
-                  .id = _id,
-                  .log_manager = _resources.api.log_mgr(),
-                  .inputs = _ntp_ctxs,
-                  .locks = _resources.log_mtx};
-              return write_materialized(std::move(reply.value().data.resps), args);
+                .id = _id,
+                .frontend = _resources.frontend.local(),
+                .cache = _resources.cache,
+                .log_manager = _resources.api.log_mgr(),
+                .inputs = _ntp_ctxs,
+                .locks = _resources.log_mtx,
+                .topic_promises = _resources.topic_promises};
+              return write_materialized(
+                std::move(reply.value().data.resps), args);
           }
           vlog(
             coproclog.warn,

@@ -52,11 +52,15 @@ rpc::backoff_policy wasm_transport_backoff() {
 pacemaker::pacemaker(
   unresolved_address addr,
   ss::sharded<storage::api>& api,
+  ss::sharded<cluster::topics_frontend>& frontend,
+  ss::sharded<cluster::metadata_cache>& cache,
   ss::sharded<cluster::partition_manager>& pm)
   : _shared_res(
     rpc::reconnect_transport(
       wasm_transport_cfg(addr), wasm_transport_backoff()),
     api.local(),
+    frontend,
+    cache.local(),
     pm.local()) {
     _offs.timer.set_callback([this] {
         (void)ss::with_gate(_gate, [this] {

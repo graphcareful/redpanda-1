@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "cluster/metadata_cache.h"
+#include "cluster/topics_frontend.h"
 #include "coproc/ntp_context.h"
 #include "coproc/types.h"
 #include "utils/mutex.h"
@@ -26,16 +28,21 @@ using output_write_inputs = std::vector<process_batch_reply::data>;
 /// Arugments to pass to 'write_materialized', trivially copyable
 struct output_write_args {
     coproc::script_id id;
+    cluster::topics_frontend& frontend;
+    cluster::metadata_cache& cache;
     storage::log_manager& log_manager;
     ntp_context_cache& inputs;
     absl::node_hash_map<model::ntp, mutex>& locks;
+    absl::node_hash_map<model::topic_namespace, ss::shared_promise<>>&
+      topic_promises;
 };
 
 /**
  * Process the wasm engines response may produce side effects within storage
  *
  * The output of a wasm engine may be one of three types:
- * 1. Filter - an ack without an associated transform, bump offset & move on.
+ * 1. Filter - an ack without an associated transform, bump offset & move
+ * on.
  * 2. Normal - create/write transform to a set of materialized logs.
  * 3. Error - Re-try or deregister script depending on error + policy.
  *
