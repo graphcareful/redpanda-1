@@ -11,7 +11,9 @@
 
 #pragma once
 
+#include "cluster/metadata_cache.h"
 #include "cluster/partition_manager.h"
+#include "cluster/topics_frontend.h"
 #include "config/configuration.h"
 #include "coproc/ntp_context.h"
 #include "coproc/offset_storage_utils.h"
@@ -45,6 +47,8 @@ public:
     pacemaker(
       unresolved_address,
       ss::sharded<storage::api>&,
+      ss::sharded<cluster::topics_frontend>&,
+      ss::sharded<cluster::metadata_cache>&,
       ss::sharded<cluster::partition_manager>&);
 
     /**
