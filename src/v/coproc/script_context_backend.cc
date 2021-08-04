@@ -37,7 +37,7 @@ private:
     model::record_batch_reader::data_t _batches;
 };
 
-static ss::future<bool> do_write_materialized_partition(
+static ss::future<> do_write_materialized_partition(
   storage::log log, model::record_batch_reader reader) {
     /// Re-write all batch term_ids to 1, otherwise they will carry the
     /// term ids of records coming from parent batches
@@ -48,7 +48,7 @@ static ss::future<bool> do_write_materialized_partition(
         model::no_timeout);
     if (!success) {
         /// In the case crc checks failed, do NOT write records to storage
-        co_return false;
+        co_return;
     }
     /// Compress the data before writing...
     auto compressed = co_await std::move(batch_w_correct_terms)
@@ -64,22 +64,91 @@ static ss::future<bool> do_write_materialized_partition(
     co_await std::move(compressed)
       .for_each_ref(log.make_appender(write_cfg), model::no_timeout)
       .discard_result();
-    co_return true;
+}
+
+static ss::future<> create_materialized_topic(
+  model::topic_namespace source,
+  model::topic_namespace new_materialized,
+  bool is_leader,
+  output_write_args args) {
+    /// If the materialized topic alreday exists, do nothing
+    if (args.cache.get_topic_cfg(new_materialized)) {
+        return ss::now();
+    }
+    /// See if theres an associated shared promise, if not create one. It is
+    /// resolved when the desired materialized topic has been created.
+    auto [itr, _] = args.topic_promises.emplace(
+      new_materialized, ss::shared_promise());
+    if (!is_leader) {
+        /// In either case if the source topic is not a leader do not let it
+        /// attempt to make a create_topics request, wait until the topic has
+        /// been created.
+        return itr->second.get_shared_future();
+    }
+
+    auto item = args.cache.get_topic_cfg(source);
+    /// TODO: Potential race between deletion of source topic and creation of
+    /// materialized topic, for now not an issue as deletion of source topics is
+    /// prohibited.
+    vassert(
+      item, "Source topic for materialized topic doesn't exist: {}", source);
+    item->tp_ns.tp = new_materialized.tp;
+    item->properties.source_topic = source.tp();
+    return args.frontend.create_topics({std::move(*item)}, model::no_timeout)
+      .then([&tps = args.topic_promises,
+             new_materialized = std::move(new_materialized)](
+              std::vector<cluster::topic_result> result) {
+          vassert(
+            result.size() == 1, "Expected only one topic_result response");
+          const auto ec = result[0].ec;
+          if (ec == cluster::errc::success) {
+              vlog(
+                coproclog.info,
+                "Created materialized log: {}",
+                new_materialized);
+          } else if (ec == cluster::errc::topic_already_exists) {
+              vlog(
+                coproclog.info,
+                "Materialzed log has come into existance via another node: {}",
+                new_materialized);
+          } else {
+              return ss::make_exception_future<>(
+                materialized_topic_replication_exception(fmt::format(
+                  "Failed to replicate materialized topic: {}, error: {}",
+                  new_materialized,
+                  result[0].ec)));
+          }
+          /// Alert waiters and cleanup state used for notification mechanism.
+          auto found = tps.find(new_materialized);
+          found->second.set_value();
+          tps.erase(found);
+          return ss::now();
+      });
 }
 
 static ss::future<storage::log>
 get_log(storage::log_manager& log_mgr, const model::ntp& ntp) {
     auto found = log_mgr.get(ntp);
     if (found) {
+        /// Log exists, do nothing and return it
         return ss::make_ready_future<storage::log>(*found);
     }
-    vlog(coproclog.info, "Making new log: {}", ntp);
-    return log_mgr.manage(storage::ntp_config(ntp, log_mgr.config().base_dir));
+    /// In the case the storage::log has not been created, but the topic has,
+    /// register to recieve a notification when it is created.
+    ss::promise<storage::log> p;
+    auto f = p.get_future();
+    auto id = log_mgr.register_manage_notification(
+      ntp, [p = std::move(p)](storage::log log) mutable { p.set_value(log); });
+    return f.then([&log_mgr, id](storage::log log) {
+        log_mgr.unregister_manage_notification(id);
+        return log;
+    });
 }
 
-static ss::future<bool> write_materialized_partition(
+static ss::future<> write_materialized_partition(
   const model::ntp& ntp,
   model::record_batch_reader reader,
+  ss::lw_shared_ptr<ntp_context> ctx,
   output_write_args args) {
     auto found = args.locks.find(ntp);
     if (found == args.locks.end()) {
@@ -95,6 +164,8 @@ static ss::future<bool> write_materialized_partition(
       });
 }
 
+/// TODO: If we group replies by destination topic, we can increase write
+/// throughput, be attentive to maintain relative ordering though..
 static ss::future<>
 process_one_reply(process_batch_reply::data e, output_write_args args) {
     /// Ensure this 'script_context' instance is handling the correct reply
@@ -126,10 +197,20 @@ process_one_reply(process_batch_reply::data e, output_write_args args) {
         co_return;
     }
     auto ntp_ctx = found->second;
-    auto success = co_await write_materialized_partition(
-      e.ntp, std::move(*e.reader), args);
-    if (!success) {
-        vlog(coproclog.warn, "record_batch failed to pass crc checks");
+    try {
+        co_await write_materialized_partition(
+          e.ntp, std::move(*e.reader), ntp_ctx, args);
+    } catch (const crc_failed_exception& ex) {
+        vlog(
+          coproclog.error,
+          "Reprocessing record, failure encountered, {}",
+          ex.what());
+        co_return;
+    } catch (const materialized_topic_replication_exception& ex) {
+        vlog(
+          coproclog.error,
+          "Failed to create materialized topic: {}",
+          ex.what());
         co_return;
     }
     auto ofound = ntp_ctx->offsets.find(args.id);

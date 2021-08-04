@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "cluster/metadata_cache.h"
+#include "cluster/topics_frontend.h"
 #include "coproc/ntp_context.h"
 #include "coproc/sys_refs.h"
 #include "coproc/types.h"
@@ -30,13 +32,16 @@ struct output_write_args {
     sys_refs& rs;
     ntp_context_cache& inputs;
     absl::node_hash_map<model::ntp, mutex>& locks;
+    absl::node_hash_map<model::topic_namespace, ss::shared_promise<>>&
+      topic_promises;
 };
 
 /**
  * Process the wasm engines response may produce side effects within storage
  *
  * The output of a wasm engine may be one of three types:
- * 1. Filter - an ack without an associated transform, bump offset & move on.
+ * 1. Filter - an ack without an associated transform, bump offset & move
+ * on.
  * 2. Normal - create/write transform to a set of materialized logs.
  * 3. Error - Re-try or deregister script depending on error + policy.
  *

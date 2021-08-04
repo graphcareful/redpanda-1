@@ -51,8 +51,8 @@ ss::future<> script_context::start() {
           [this] { return _abort_source.abort_requested(); },
           [this] {
               /// do_execute is by design expected to throw one type of
-              /// exception, \ref script_failed_exception for which there is a
-              /// handler setup by the invoker of this start() method
+              /// exception, \ref script_failed_exception for which there is
+              /// a handler setup by the invoker of this start() method
               return do_execute().then([this] {
                   return ss::sleep_abortable(
                            _resources.jitter.next_jitter_duration(),
@@ -64,10 +64,10 @@ ss::future<> script_context::start() {
 }
 
 ss::future<> script_context::do_execute() {
-    /// This loop executes while there is data to read from the input logs and
-    /// while there is a current successful connection to the wasm engine.
-    /// If both of those conditions aren't met, the loop breaks, hitting the
-    /// sleep_abortable() call in the fiber started by 'start()'
+    /// This loop executes while there is data to read from the input logs
+    /// and while there is a current successful connection to the wasm
+    /// engine. If both of those conditions aren't met, the loop breaks,
+    /// hitting the sleep_abortable() call in the fiber started by 'start()'
     return ss::repeat([this] {
         if (_abort_source.abort_requested()) {
             return ss::make_ready_future<ss::stop_iteration>(
@@ -122,7 +122,8 @@ ss::future<> script_context::send_request(
                 .id = _id,
                 .rs = _resources.rs,
                 .inputs = _ntp_ctxs,
-                .locks = _resources.log_mtx};
+                .locks = _resources.log_mtx,
+                .topic_promises = _resources.topic_promises};
               return write_materialized(
                 std::move(reply.value().data.resps), args);
           }
@@ -133,5 +134,4 @@ ss::future<> script_context::send_request(
           return ss::now();
       });
 }
-
 } // namespace coproc
