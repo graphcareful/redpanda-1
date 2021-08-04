@@ -11,7 +11,10 @@
 
 #pragma once
 
+#include "cluster/metadata_cache.h"
 #include "cluster/partition_manager.h"
+#include "cluster/topics_frontend.h"
+#include "coproc/materialized_topics_frontend.h"
 #include "storage/api.h"
 
 #include <seastar/core/sharded.hh>
@@ -22,6 +25,9 @@ namespace coproc {
 /// leverage
 struct sys_refs {
     ss::sharded<storage::api>& storage;
+    ss::sharded<materialized_topics_frontend>& mt_frontend;
+    ss::sharded<cluster::topics_frontend>& topics_frontend;
+    ss::sharded<cluster::metadata_cache>& metadata_cache;
     ss::sharded<cluster::partition_manager>& partition_manager;
 };
 

@@ -12,6 +12,7 @@
 #pragma once
 
 #include "coproc/event_listener.h"
+#include "coproc/materialized_topics_frontend.h"
 #include "coproc/pacemaker.h"
 #include "coproc/sys_refs.h"
 
@@ -26,12 +27,19 @@ public:
     api(
       unresolved_address addr,
       ss::sharded<storage::api>& storage,
+      ss::sharded<cluster::topics_frontend>& topics_frontend,
+      ss::sharded<cluster::metadata_cache>& metadata_cache,
       ss::sharded<cluster::partition_manager>& partition_manager) noexcept
       : _engine_addr(std::move(addr))
       , _rs(sys_refs{
-          .storage = storage, .partition_manager = partition_manager}) {}
+          .storage = storage,
+          .mt_frontend = _mt_frontend,
+          .topics_frontend = topics_frontend,
+          .metadata_cache = metadata_cache,
+          .partition_manager = partition_manager}) {}
 
     ss::future<> start() {
+        co_await _mt_frontend.start_single(std::ref(_rs.topics_frontend));
         co_await _pacemaker.start(_engine_addr, std::ref(_rs));
         co_await _pacemaker.invoke_on_all(&coproc::pacemaker::start);
         _listener = std::make_unique<wasm::event_listener>(_pacemaker);
@@ -43,7 +51,9 @@ public:
         if (_listener) {
             f = _listener->stop();
         }
-        return f.then([this] { return _pacemaker.stop(); });
+        return f.then([this] { return _pacemaker.stop(); }).then([this] {
+            return _mt_frontend.stop();
+        });
     }
 
     ss::sharded<pacemaker>& get_pacemaker() { return _pacemaker; }
@@ -51,8 +61,9 @@ public:
 private:
     unresolved_address _engine_addr;
     sys_refs _rs;
-    std::unique_ptr<wasm::event_listener> _listener; /// one instance
-    ss::sharded<pacemaker> _pacemaker;               /// one per core
+    std::unique_ptr<wasm::event_listener> _listener;        /// one instance
+    ss::sharded<pacemaker> _pacemaker;                      /// one per core
+    ss::sharded<materialized_topics_frontend> _mt_frontend; /// one instance
 };
 
 } // namespace coproc
