@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "cluster/metadata_cache.h"
+#include "cluster/topics_frontend.h"
 #include "coproc/ntp_context.h"
 #include "coproc/types.h"
 #include "utils/mutex.h"
@@ -26,6 +28,8 @@ using output_write_inputs = std::vector<process_batch_reply::data>;
 /// Arugments to pass to 'write_materialized', trivially copyable
 struct output_write_args {
     coproc::script_id id;
+    cluster::topics_frontend& frontend;
+    cluster::metadata_cache& cache;
     storage::log_manager& log_manager;
     ntp_context_cache& inputs;
     absl::node_hash_map<model::ntp, mutex>& locks;

@@ -19,6 +19,29 @@
 #include <seastar/core/coroutine.hh>
 
 namespace coproc {
+
+class crc_failed_exception final : public std::exception {
+public:
+    explicit crc_failed_exception(ss::sstring msg) noexcept
+      : _msg(std::move(msg)) {}
+
+    const char* what() const noexcept final { return _msg.c_str(); }
+
+private:
+    ss::sstring _msg;
+};
+
+class materialized_topic_replication_exception : public std::exception {
+public:
+    explicit materialized_topic_replication_exception(ss::sstring msg) noexcept
+      : _msg(std::move(msg)) {}
+
+    const char* what() const noexcept final { return _msg.c_str(); }
+
+private:
+    ss::sstring _msg;
+};
+
 /// Sets all of the term_ids in a batch of record batches to be a newly
 /// desired term.
 class term_id_updater {
@@ -43,7 +66,7 @@ private:
     model::record_batch_reader::data_t _batches;
 };
 
-static ss::future<bool> do_write_materialized_partition(
+static ss::future<> do_write_materialized_partition(
   storage::log log,
   model::term_id highest_term,
   model::record_batch_reader reader) {
@@ -65,7 +88,7 @@ static ss::future<bool> do_write_materialized_partition(
         model::record_batch_crc_checker(), term_id_updater(new_term)),
       model::no_timeout);
     if (!crc_success) {
-        co_return false;
+        throw crc_failed_exception("A record batch failed to pass crc checks");
     }
     auto nrbr = co_await std::move(rbr).for_each_ref(
       storage::internal::compress_batch_consumer(model::compression::zstd, 512),
@@ -77,23 +100,93 @@ static ss::future<bool> do_write_materialized_partition(
       .timeout = model::no_timeout};
     co_await std::move(nrbr).for_each_ref(
       log.make_appender(write_cfg), model::no_timeout);
-    co_return true;
 }
 
-static ss::future<storage::log>
-get_log(storage::log_manager& log_mgr, model::ntp ntp) {
+static ss::future<> create_materialized_topic(
+  cluster::topics_frontend& frontend,
+  cluster::metadata_cache& cache,
+  const model::topic_namespace_view& source,
+  const model::topic& new_topic) {
+    auto item = cache.get_topic_cfg(source);
+    /// TODO: Potential race between deletion of source topic and creation of
+    /// materialized topic, implement fix when we support deletion of source
+    /// topics
+    vassert(
+      item, "Source topic for materialized topic doesn't exist: {}", source);
+    item->tp_ns.tp = new_topic;
+    item->properties.source_topic = source.tp();
+    return frontend.create_topics({std::move(*item)}, model::no_timeout)
+      .then([new_topic](std::vector<cluster::topic_result> result) {
+          vassert(
+            result.size() == 1, "Expected only one topic_result response");
+          if (result[0].ec != cluster::errc::success) {
+              throw materialized_topic_replication_exception(fmt::format(
+                "Failed to replicate materialized topic: {}, error: {}",
+                new_topic,
+                result[0].ec));
+          }
+      });
+}
+
+static ss::future<storage::log> get_log(
+  cluster::topics_frontend& frontend,
+  cluster::metadata_cache& cache,
+  storage::log_manager& log_mgr,
+  model::ntp ntp,
+  ss::lw_shared_ptr<ntp_context> ctx) {
     auto found = log_mgr.get(ntp);
     if (found) {
+        /// Log exists, do nothing and return it
         return ss::make_ready_future<storage::log>(*found);
     }
-    vlog(coproclog.info, "Making new log: {}", ntp);
-    return log_mgr.manage(storage::ntp_config(ntp, log_mgr.config().base_dir));
+    /// Topic itself doesn't exist
+    if (!ctx->partition->is_leader()) {
+        throw materialized_topic_replication_exception(
+          "Must wait for leader to create topic before follower can create a "
+          "log");
+    }
+    /// Leader of source topic requesting to create materialized topic
+    return create_materialized_topic(
+             frontend,
+             cache,
+             model::topic_namespace_view(ctx->ntp()),
+             ntp.tp.topic)
+      .then([&log_mgr, ntp] {
+          /// The future returned by frontend::create_topic returns after the
+          /// command has been replicated, this doesn't mean that the effects of
+          /// the command (i.e. inserting to shardtable/storage::manage) have
+          /// yet occurred
+          auto log = log_mgr.get(ntp);
+          if (log) {
+              /// If underlying log has been created by the time this future is
+              /// called
+              vlog(coproclog.info, "Created materialized log: {}", ntp);
+              return ss::make_ready_future<storage::log>(*log);
+          }
+          /// In the case the underlying log has not been created, register to
+          /// recieve a notification when it is created
+          ss::promise<storage::log> p;
+          auto f = p.get_future();
+          log_mgr.register_manage_notification(
+            ntp, [ntp, p = std::move(p)](storage::log log) mutable {
+                /// NOTE: This callback cannot be called twice, since the run
+                /// loop of a coprocessor is single threaded progress won't be
+                /// made until this future is resolved.
+                /// NOTE: Other 'run_loops' via other coprocessors attempting to
+                /// create the same materialized log will not be an issue since
+                /// this method is accessed via a mutual exclusion lock
+                vlog(coproclog.info, "Created materialized log: {}", ntp);
+                p.set_value(log);
+            });
+          return f;
+      });
 }
 
-static ss::future<bool> write_materialized_partition(
+static ss::future<> write_materialized_partition(
   model::ntp ntp,
   model::term_id highest_term,
   model::record_batch_reader reader,
+  ss::lw_shared_ptr<ntp_context> ctx,
   output_write_args args) {
     auto found = args.locks.find(ntp);
     if (found == args.locks.end()) {
@@ -102,8 +195,8 @@ static ss::future<bool> write_materialized_partition(
     /// NOTE: Converting this to a coroutine causes a guaranteed crash even with
     /// clang.. why?
     return found->second.with(
-      [ntp, highest_term, args, reader = std::move(reader)]() mutable {
-          return get_log(args.log_manager, ntp)
+      [ctx, ntp, highest_term, args, reader = std::move(reader)]() mutable {
+          return get_log(args.frontend, args.cache, args.log_manager, ntp, ctx)
             .then([highest_term, ntp, reader = std::move(reader)](
                     storage::log log) mutable {
                 return do_write_materialized_partition(
@@ -144,10 +237,18 @@ process_one_reply(process_batch_reply::data e, output_write_args args) {
     }
     auto ntp_ctx = found->second;
     model::term_id highest_term = ntp_ctx->partition->term();
-    auto success = co_await write_materialized_partition(
-      e.ntp, highest_term, std::move(*e.reader), args);
-    if (!success) {
-        vlog(coproclog.warn, "record_batch failed to pass crc checks");
+    try {
+        co_await write_materialized_partition(
+          e.ntp, highest_term, std::move(*e.reader), ntp_ctx, args);
+    } catch (const crc_failed_exception& ex) {
+        vlog(
+          coproclog.error,
+          "Reprocessing record, failure encountered, {}",
+          ex.what());
+        co_return;
+    } catch (const materialized_topic_replication_exception& ex) {
+        vlog(
+          coproclog.error, "Materialized topic already created {}", ex.what());
         co_return;
     }
     auto ofound = ntp_ctx->offsets.find(args.id);
