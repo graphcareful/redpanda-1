@@ -303,6 +303,12 @@ topic_table::apply(create_materialized_topic_cmd cmd, model::offset o) {
     tca.configuration.cfg.tp_ns.tp = new_materialized_topic.tp;
     tca.configuration.cfg.properties.source_topic = source.tp();
     _topics.insert({cmd.key, std::move(tca)});
+    auto found = _topics_hierarchy.find(source);
+    if (found == _topics_hierarchy.end()) {
+        _topics_hierarchy[source] = {new_materialized_topic};
+    } else {
+        found->second.push_back(new_materialized_topic);
+    }
     notify_waiters();
     co_return make_error_code(errc::success);
 }

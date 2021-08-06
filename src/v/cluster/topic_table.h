@@ -44,6 +44,12 @@ public:
       model::topic_namespace_hash,
       model::topic_namespace_eq>;
 
+    using underlying_copro_t = absl::flat_hash_map<
+      model::topic_namespace,
+      std::vector<model::topic_namespace>,
+      model::topic_namespace_hash,
+      model::topic_namespace_eq>;
+
     using delta_cb_t
       = ss::noncopyable_function<void(const std::vector<delta>&)>;
 
@@ -135,6 +141,17 @@ public:
 
     const underlying_t& topics_map() const { return _topics; }
 
+    std::vector<model::ntp> materialized_children(const model::ntp& ntp) const {
+        std::vector<model::ntp> c;
+        auto found = _topics_hierarchy.find(model::topic_namespace_view{ntp});
+        if (found != _topics_hierarchy.end()) {
+            for (const auto& ct_ns : found->second) {
+                c.emplace_back(ct_ns.ns, ct_ns.tp, ntp.tp.partition);
+            }
+        }
+        return c;
+    }
+
 private:
     struct waiter {
         explicit waiter(uint64_t id)
@@ -152,6 +169,7 @@ private:
     transform_topics(Func&&) const;
 
     underlying_t _topics;
+    underlying_copro_t _topics_hierarchy;
 
     absl::flat_hash_set<model::ntp> _update_in_progress;
 
