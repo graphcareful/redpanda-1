@@ -932,6 +932,7 @@ ss::future<std::error_code> controller_backend::create_partition(
     }
 
     auto f = ss::now();
+
     // handle partially created topic
     auto partition = _partition_manager.local().get(ntp);
     // no partition exists, create one
