@@ -116,7 +116,7 @@ FIXTURE_TEST(test_copro_tip_stored, coproc_test_fixture) {
     produce(
       sttp_ntp,
       storage::test::make_random_memory_record_batch_reader(
-        model::offset{0}, 40, 1))
+        model::offset{0}, 40, 1, false))
       .get();
 
     auto results = consume_materialized(sttp_ntp, output_ntp, 80).get();
