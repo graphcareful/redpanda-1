@@ -97,8 +97,12 @@ ss::future<> metadata_dissemination_service::start() {
                 return;
             }
             auto ntp = c->ntp();
-            handle_leadership_notification(
-              std::move(ntp), term, std::move(leader_id));
+            auto cs = _topics.local().materialized_children(ntp);
+            handle_leadership_notification(std::move(ntp), term, leader_id);
+            for (auto& c : cs) {
+                // update materialized partition leaders as well
+                handle_leadership_notification(std::move(c), term, leader_id);
+            }
         });
 
     if (ss::this_shard_id() != 0) {

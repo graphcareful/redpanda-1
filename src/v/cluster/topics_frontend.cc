@@ -208,6 +208,40 @@ ss::future<topic_result> topics_frontend::do_update_topic_properties(
     }
 }
 
+ss::future<topic_result> topics_frontend::do_create_materialized_topic(
+  model::topic_namespace source,
+  model::topic_namespace materialized,
+  model::timeout_clock::time_point timeout) {
+    if (!validate_topic_name(materialized)) {
+        co_return topic_result(
+          topic_result(std::move(materialized), errc::invalid_topic_name));
+    }
+
+    create_materialized_topic_cmd cmd(materialized, source);
+    try {
+        auto ec = co_await replicate_and_wait(std::move(cmd), timeout);
+        if (!ec) {
+            std::vector<ntp_leader> leaders;
+            for (auto& leader : _leaders.local().get_leaders(source)) {
+                leader.first.tp.topic = materialized.tp;
+                leaders.emplace_back(std::move(leader.first), leader.second);
+            }
+            co_await update_leaders_with_estimates(leaders);
+        }
+        co_return topic_result(materialized, map_errc(ec));
+    } catch (const std::exception& ex) {
+        vlog(
+          clusterlog.warn,
+          "unable to create materialized topic {} - source topic - {} reason: "
+          "{}",
+          materialized,
+          source,
+          ex.what());
+        co_return topic_result(
+          std::move(materialized), errc::replication_error);
+    }
+}
+
 template<typename Cmd>
 ss::future<std::error_code> topics_frontend::replicate_and_wait(
   Cmd&& cmd, model::timeout_clock::time_point timeout) {
@@ -244,6 +278,14 @@ allocation_request make_allocation_request(const topic_configuration& cfg) {
 
 ss::future<topic_result> topics_frontend::do_create_topic(
   topic_configuration t_cfg, model::timeout_clock::time_point timeout) {
+    if (t_cfg.properties.source_topic) {
+        /// If there exist a value for the 'source_topic' field, then create the
+        /// topic is to be created as a 'materialized' topic
+        model::topic_namespace src_tn(
+          t_cfg.tp_ns.ns,
+          model::topic(std::move(*t_cfg.properties.source_topic)));
+        return do_create_materialized_topic(src_tn, t_cfg.tp_ns, timeout);
+    }
     if (!validate_topic_name(t_cfg.tp_ns)) {
         return ss::make_ready_future<topic_result>(
           topic_result(t_cfg.tp_ns, errc::invalid_topic_name));

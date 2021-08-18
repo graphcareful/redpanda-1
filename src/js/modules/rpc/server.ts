@@ -179,7 +179,9 @@ export class ProcessBatchServer extends SupervisorServer {
         logger.info(`invalid topic on wasm script: ${handleDef.id}`);
         return errors.createResponseScriptInvalidTopic(handle);
       }
-      logger.info(`wasm script loaded on nodejs engine : ${handleDef.id}`);
+      logger.info(
+        `wasm script loaded on nodejs engine : ${handleDef.id} with topics ${handle.coprocessor.inputTopics}`
+      );
       this.repository.add(handle);
       return errors.createResponseSuccess(handle);
     }
@@ -285,12 +287,14 @@ export class ProcessBatchServer extends SupervisorServer {
         );
         this.repository.remove(handle);
         return Promise.resolve({
+          source: processBatchRequest.ntp,
           ntp: processBatchRequest.ntp,
           coprocessorId: coprocessor.globalId,
           resultRecordBatch: undefined,
         });
       case PolicyError.SkipOnFailure:
         return Promise.resolve({
+          source: processBatchRequest.ntp,
           ntp: processBatchRequest.ntp,
           coprocessorId: coprocessor.globalId,
           resultRecordBatch: [],

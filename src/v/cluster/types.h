@@ -310,6 +310,7 @@ struct topic_properties {
     std::optional<model::compaction_strategy> compaction_strategy;
     std::optional<model::timestamp_type> timestamp_type;
     std::optional<size_t> segment_size;
+    std::optional<ss::sstring> source_topic;
     tristate<size_t> retention_bytes;
     tristate<std::chrono::milliseconds> retention_duration;
 
@@ -444,9 +445,6 @@ struct patch {
     }
 };
 
-// generic type used for various registration handles such as in ntp_callbacks.h
-using notification_id_type = named_type<int32_t, struct notification_id>;
-
 struct configuration_invariants {
     static constexpr uint8_t current_version = 0;
     // version 0: node_id, core_count
@@ -480,7 +478,14 @@ private:
 };
 // delta propagated to backend
 struct topic_table_delta {
-    enum class op_type { add, del, update, update_finished, update_properties };
+    enum class op_type {
+        add,
+        add_materialized,
+        del,
+        update,
+        update_finished,
+        update_properties
+    };
 
     topic_table_delta(
       model::ntp,

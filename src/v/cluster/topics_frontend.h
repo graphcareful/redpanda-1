@@ -72,6 +72,11 @@ private:
     ss::future<topic_result>
       do_delete_topic(model::topic_namespace, model::timeout_clock::time_point);
 
+    ss::future<topic_result> do_create_materialized_topic(
+      model::topic_namespace,
+      model::topic_namespace,
+      model::timeout_clock::time_point);
+
     template<typename Cmd>
     ss::future<std::error_code>
     replicate_and_wait(Cmd&&, model::timeout_clock::time_point);

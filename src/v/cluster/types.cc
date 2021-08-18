@@ -205,6 +205,8 @@ operator<<(std::ostream& o, const topic_table_delta::op_type& tp) {
         return o << "update_finished";
     case topic_table_delta::op_type::update_properties:
         return o << "update_properties";
+    case topic_table_delta::op_type::add_materialized:
+        return o << "materialized_addition";
     }
     __builtin_unreachable();
 }
@@ -272,6 +274,7 @@ void adl<cluster::topic_configuration>::to(
       t.properties.compaction_strategy,
       t.properties.timestamp_type,
       t.properties.segment_size,
+      t.properties.source_topic,
       t.properties.retention_bytes,
       t.properties.retention_duration);
 }
@@ -295,6 +298,7 @@ adl<cluster::topic_configuration>::from(iobuf_parser& in) {
     cfg.properties.timestamp_type
       = adl<std::optional<model::timestamp_type>>{}.from(in);
     cfg.properties.segment_size = adl<std::optional<size_t>>{}.from(in);
+    cfg.properties.source_topic = adl<std::optional<ss::sstring>>{}.from(in);
     cfg.properties.retention_bytes = adl<tristate<size_t>>{}.from(in);
     cfg.properties.retention_duration
       = adl<tristate<std::chrono::milliseconds>>{}.from(in);

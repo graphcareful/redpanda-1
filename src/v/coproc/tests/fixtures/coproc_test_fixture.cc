@@ -14,8 +14,7 @@
 #include "config/configuration.h"
 #include "coproc/logger.h"
 #include "coproc/tests/fixtures/fixture_utils.h"
-#include "kafka/server/materialized_partition.h"
-#include "kafka/server/replicated_partition.h"
+#include "kafka/server/partition_proxy.h"
 #include "model/record_batch_reader.h"
 #include "model/timeout_clock.h"
 #include "model/timestamp.h"
@@ -82,90 +81,80 @@ ss::future<> coproc_test_fixture::restart() {
     co_await _root_fixture->wait_for_controller_leadership();
 }
 
-/// TODO: Code duplication remove after a rebase of dev
-static std::optional<kafka::partition_proxy> make_partition_proxy(
-  const model::materialized_ntp& ntp,
-  ss::lw_shared_ptr<cluster::partition> partition,
-  cluster::partition_manager& pm) {
-    if (!ntp.is_materialized()) {
-        return kafka::make_partition_proxy<kafka::replicated_partition>(
-          partition);
+ss::future<std::optional<ss::shard_id>>
+coproc_test_fixture::wait_for_ntp(model::ntp ntp) {
+    std::optional<ss::shard_id> id;
+    try {
+        co_await tests::cooperative_spin_wait_with_timeout(
+          25s, [this, ntp = std::move(ntp), &id] {
+              id = _root_fixture->app.shard_table.local().shard_for(ntp);
+              return id.has_value();
+          });
+    } catch (const std::exception& ex) {
+        co_return std::nullopt;
     }
-    if (auto log = pm.log(ntp.input_ntp()); log) {
-        return kafka::make_partition_proxy<kafka::materialized_partition>(*log);
-    }
-    return std::nullopt;
+    co_return id;
 }
 
 ss::future<std::optional<model::record_batch_reader::data_t>>
 coproc_test_fixture::drain(
-  const model::ntp& ntp,
+  model::ntp ntp,
   std::size_t limit,
   model::offset offset,
   model::timeout_clock::time_point timeout) {
-    const auto m_ntp = model::materialized_ntp(std::move(ntp));
-    auto shard_id = _root_fixture->app.shard_table.local().shard_for(
-      m_ntp.source_ntp());
+    auto shard_id = co_await wait_for_ntp(ntp);
     if (!shard_id) {
         vlog(
-          coproc::coproclog.error,
-          "No ntp exists, cannot drain from ntp: {}",
-          m_ntp.input_ntp());
-        return ss::make_ready_future<
-          std::optional<model::record_batch_reader::data_t>>(std::nullopt);
+          coproc::coproclog.info,
+          "No ntp exists {} cannot drain data from log: ",
+          ntp);
     }
     vlog(
       coproc::coproclog.info,
       "searching for ntp {} on shard id {} ...with value for limit: {}",
-      m_ntp.input_ntp(),
+      ntp,
       *shard_id,
       limit);
-    return _root_fixture->app.partition_manager.invoke_on(
+    using ret_t = std::optional<model::record_batch_reader::data_t>;
+    auto& cache = _root_fixture->app.metadata_cache;
+    co_return co_await _root_fixture->app.partition_manager.invoke_on(
       *shard_id,
-      [m_ntp, limit, offset, timeout](cluster::partition_manager& pm) {
-          return tests::cooperative_spin_wait_with_timeout(
-                   60s,
-                   [&pm, m_ntp] {
-                       auto partition = pm.get(m_ntp.source_ntp());
-                       return partition && partition->is_leader()
-                              && (!m_ntp.is_materialized() || pm.log(m_ntp.input_ntp()));
-                   })
-            .then([&pm, m_ntp, limit, offset, timeout] {
-                auto partition = pm.get(m_ntp.source_ntp());
-                auto partition_proxy = make_partition_proxy(
-                  m_ntp, partition, pm);
-                return do_drain(
-                         offset,
-                         limit,
-                         timeout,
-                         [pp = std::move(partition_proxy)](
-                           model::offset next_offset) mutable {
-                             return pp->make_reader(log_rdr_cfg(next_offset));
-                         })
-                  .then([](auto data) {
-                      return std::optional<model::record_batch_reader::data_t>(
-                        std::move(data));
-                  });
+      [&cache, ntp, limit, offset, timeout](
+        cluster::partition_manager& pm) -> ss::future<ret_t> {
+          co_await tests::cooperative_spin_wait_with_timeout(
+            60s, [&pm, ntp] { return pm.log(ntp) != std::nullopt; });
+          auto partition = kafka::make_partition_proxy(ntp, cache.local(), pm);
+          if (!partition) {
+              co_return std::nullopt;
+          }
+          auto data = co_await do_drain(
+            offset,
+            limit,
+            timeout,
+            [partition = std::move(partition)](
+              model::offset next_offset) mutable {
+                return partition->make_reader(log_rdr_cfg(next_offset));
             });
+          co_return ret_t(std::move(data));
       });
 }
 
-ss::future<model::offset> coproc_test_fixture::push(
-  const model::ntp& ntp, model::record_batch_reader rbr) {
-    auto shard_id = _root_fixture->app.shard_table.local().shard_for(ntp);
+ss::future<model::offset>
+coproc_test_fixture::push(model::ntp ntp, model::record_batch_reader rbr) {
+    auto shard_id = co_await wait_for_ntp(ntp);
     if (!shard_id) {
         vlog(
           coproc::coproclog.error,
           "No ntp exists, cannot push data to log: {}",
           ntp);
-        return ss::make_ready_future<model::offset>(model::offset(-1));
+        co_return model::offset{-1};
     }
     vlog(
       coproc::coproclog.info,
       "Pushing record_batch_reader to ntp: {} on shard_id: {}",
       ntp,
       *shard_id);
-    return _root_fixture->app.partition_manager.invoke_on(
+    co_return co_await _root_fixture->app.partition_manager.invoke_on(
       *shard_id,
       [ntp, rbr = std::move(rbr)](cluster::partition_manager& pm) mutable {
           auto partition = pm.get(ntp);
