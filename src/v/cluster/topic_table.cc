@@ -106,15 +106,30 @@ ss::future<> topic_table::stop() {
 
 ss::future<std::error_code>
 topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
+    auto delete_type = delta::op_type::del;
     if (auto tp = _topics.find(cmd.value); tp != _topics.end()) {
         if (tp->second.is_topic_replicable()) {
-            return ss::make_ready_future<std::error_code>(
-              errc::invalid_delete_topic_request);
+            /// TODO: Might have to resolve deletion of non_replicable_topics
+            /// with what copro engine is currently doing
+            delete_type = delta::op_type::del_non_replicable;
+            auto parent = _topics.find(model::topic_namespace{
+              cmd.value.ns, tp->second.get_source_topic()});
+            vassert(
+              parent != _topics.end(),
+              "Missing source for non_replicable topic");
+            parent->second.get_children().erase(cmd.value);
+        } else {
+            const auto& children = tp->second.get_children();
+            if (!children.empty()) {
+                return ss::make_ready_future<std::error_code>(
+                  errc::source_topic_still_in_use);
+            }
         }
+
         for (auto& p : tp->second.configuration.assignments) {
             auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, p.id);
             _pending_deltas.emplace_back(
-              std::move(ntp), std::move(p), offset, delta::op_type::del);
+              std::move(ntp), std::move(p), offset, delete_type);
         }
         _topics.erase(tp);
         notify_waiters();

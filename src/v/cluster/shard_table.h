@@ -68,6 +68,15 @@ public:
         return true;
     }
 
+    void erase_shard(const model::ntp& ntp, model::revision_id rev) {
+        if (auto it = _ntp_idx.find(ntp); it != _ntp_idx.end()) {
+            if (it->second.revision > rev) {
+                return;
+            }
+        }
+        _ntp_idx.erase(ntp);
+    }
+
     void update(
       const model::ntp& ntp,
       raft::group_id g,
