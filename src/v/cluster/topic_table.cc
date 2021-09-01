@@ -96,15 +96,17 @@ ss::future<> topic_table::stop() {
 
 ss::future<std::error_code>
 topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
+    auto delete_type = delta::op_type::del;
     if (auto tp = _topics.find(cmd.value); tp != _topics.end()) {
         if (tp->second.is_topic_replicable()) {
             return ss::make_ready_future<std::error_code>(
               errc::invalid_delete_topic_request);
         }
+
         for (auto& p : tp->second.configuration.assignments) {
             auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, p.id);
             _pending_deltas.emplace_back(
-              std::move(ntp), std::move(p), offset, delta::op_type::del);
+              std::move(ntp), std::move(p), offset, delete_type);
         }
         _topics.erase(tp);
         notify_waiters();
@@ -112,6 +114,7 @@ topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
     }
     return ss::make_ready_future<std::error_code>(errc::topic_not_exists);
 }
+
 ss::future<std::error_code>
 topic_table::apply(create_partition_cmd cmd, model::offset offset) {
     auto tp = _topics.find(cmd.key);

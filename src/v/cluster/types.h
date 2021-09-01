@@ -520,6 +520,7 @@ struct topic_table_delta {
     enum class op_type {
         add,
         del,
+        del_materialized,
         update,
         update_finished,
         update_properties,
