@@ -58,7 +58,7 @@ public:
 
     using underlying_copro_t = absl::flat_hash_map<
       model::topic_namespace,
-      std::vector<model::topic_namespace>,
+      absl::flat_hash_set<model::topic_namespace>,
       model::topic_namespace_hash,
       model::topic_namespace_eq>;
 
