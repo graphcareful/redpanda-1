@@ -514,7 +514,14 @@ private:
 };
 // delta propagated to backend
 struct topic_table_delta {
-    enum class op_type { add, del, update, update_finished, update_properties };
+    enum class op_type {
+        add,
+        add_materialized,
+        del,
+        update,
+        update_finished,
+        update_properties
+    };
 
     topic_table_delta(
       model::ntp,

@@ -212,6 +212,8 @@ operator<<(std::ostream& o, const topic_table_delta::op_type& tp) {
         return o << "update_finished";
     case topic_table_delta::op_type::update_properties:
         return o << "update_properties";
+    case topic_table_delta::op_type::add_materialized:
+        return o << "materialized_addition";
     }
     __builtin_unreachable();
 }

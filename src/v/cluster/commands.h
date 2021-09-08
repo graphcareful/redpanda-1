@@ -71,6 +71,8 @@ static constexpr int8_t delete_acls_cmd_type = 9;
 static constexpr int8_t create_data_policy_cmd_type = 0;
 static constexpr int8_t delete_data_policy_cmd_type = 1;
 
+static constexpr int8_t create_materialized_topic_cmd_type = 10;
+
 // node management commands
 static constexpr int8_t decommission_node_cmd_type = 0;
 static constexpr int8_t recommission_node_cmd_type = 1;
@@ -153,6 +155,12 @@ using delete_data_policy_cmd = controller_command<
   std::optional<ss::sstring>,
   delete_data_policy_cmd_type,
   model::record_batch_type::data_policy_management_cmd>;
+
+using create_materialized_topic_cmd = controller_command<
+  model::topic_namespace,
+  model::topic_namespace,
+  create_materialized_topic_cmd_type,
+  model::record_batch_type::topic_management_cmd>;
 
 using decommission_node_cmd = controller_command<
   model::node_id,
