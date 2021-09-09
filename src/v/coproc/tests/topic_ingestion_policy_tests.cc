@@ -44,12 +44,14 @@ public:
         /// Wait for the coprocessor to startup before next batch
         coproc::script_id id(78);
         tests::cooperative_spin_wait_with_timeout(60s, [this, id]() {
-            return root_fixture()->app.pacemaker.map_reduce0(
-              [id](coproc::pacemaker& p) {
-                  return p.local_script_id_exists(id);
-              },
-              false,
-              std::logical_or<>());
+            return root_fixture()
+              ->app.coprocessing->get_pacemaker()
+              .map_reduce0(
+                [id](coproc::pacemaker& p) {
+                    return p.local_script_id_exists(id);
+                },
+                false,
+                std::logical_or<>());
         }).get();
 
         push(
