@@ -11,6 +11,7 @@ v_cc_library(
   SRCS
     types.cc
     logger.cc
+    materialized_topics_frontend.cc
     script_context.cc
     script_context_frontend.cc
     script_context_backend.cc
