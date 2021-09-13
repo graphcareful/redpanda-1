@@ -2,6 +2,7 @@ set(fixture_srcs
     utils/event_publisher.cc
     utils/supervisor.cc
     utils/wasm_event_generator.cc
+    fixtures/new_coproc_test_fixture.cc
     fixtures/coproc_test_fixture.cc
     fixtures/coproc_bench_fixture.cc
 )

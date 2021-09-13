@@ -26,8 +26,7 @@ namespace coproc::wasm {
 /// coprocessor_internal_topic to any fixture
 class event_publisher {
 public:
-    event_publisher();
-    ~event_publisher() { _client.stop().get(); }
+    explicit event_publisher(kafka::client::client&) noexcept;
 
     /// Starts up the kafka client and sends out a create_topics request to
     /// create the 'coprocessor_internal_topic'
@@ -45,6 +44,6 @@ private:
     ss::future<> create_coproc_internal_topic();
 
 private:
-    kafka::client::client _client;
+    kafka::client::client& _client;
 };
 } // namespace coproc::wasm

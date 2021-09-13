@@ -27,12 +27,30 @@
 
 #include <chrono>
 
+namespace {
+
+std::unique_ptr<kafka::client::client> make_client() {
+    kafka::client::configuration cfg;
+    cfg.brokers.set_value(std::vector<unresolved_address>{
+      config::shard_local_cfg().kafka_api()[0].address});
+    cfg.retries.set_value(size_t(1));
+    return std::make_unique<kafka::client::client>(to_yaml(cfg));
+}
+
+} // namespace
+
 coproc_test_fixture::coproc_test_fixture() {
     ss::smp::invoke_on_all([]() {
         auto& config = config::shard_local_cfg();
         config.get("coproc_offset_flush_interval_ms").set_value(500ms);
     }).get0();
     _root_fixture = std::make_unique<redpanda_thread_fixture>();
+}
+
+coproc_test_fixture::~coproc_test_fixture() {
+    if (_client) {
+        _client->stop().get();
+    }
 }
 
 ss::future<>
@@ -43,10 +61,16 @@ coproc_test_fixture::enable_coprocessors(std::vector<deploy> copros) {
       copros.begin(), copros.end(), std::back_inserter(events), [](deploy& e) {
           return coproc::wasm::event(e.id, std::move(e.data));
       });
-    return _publisher
-      .publish_events(
-        coproc::wasm::make_event_record_batch_reader({std::move(events)}))
-      .discard_result();
+    return ss::do_with(
+      coproc::wasm::event_publisher(*_client),
+      [events = std::move(events)](auto& eb) mutable {
+          return eb.start().then([&eb, events = std::move(events)]() mutable {
+              return eb
+                .publish_events(coproc::wasm::make_event_record_batch_reader(
+                  {std::move(events)}))
+                .discard_result();
+          });
+      });
 }
 
 ss::future<>
@@ -57,19 +81,25 @@ coproc_test_fixture::disable_coprocessors(std::vector<uint64_t> ids) {
       ids.begin(), ids.end(), std::back_inserter(events), [](uint64_t id) {
           return coproc::wasm::event(id);
       });
-    return _publisher
-      .publish_events(
-        coproc::wasm::make_event_record_batch_reader({std::move(events)}))
-      .discard_result();
+    return ss::do_with(
+      coproc::wasm::event_publisher(*_client),
+      [events = std::move(events)](auto& eb) mutable {
+          return eb.start().then([&eb, events = std::move(events)]() mutable {
+              return eb
+                .publish_events(coproc::wasm::make_event_record_batch_reader(
+                  {std::move(events)}))
+                .discard_result();
+          });
+      });
 }
 
 ss::future<> coproc_test_fixture::setup(log_layout_map llm) {
     co_await _root_fixture->wait_for_controller_leadership();
-    co_await _publisher.start();
     for (auto& p : llm) {
         co_await _root_fixture->add_topic(
           model::topic_namespace(model::kafka_namespace, p.first), p.second);
     }
+    co_await _client->connect();
 }
 
 ss::future<> coproc_test_fixture::restart() {
