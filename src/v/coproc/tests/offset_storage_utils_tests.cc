@@ -11,7 +11,7 @@
 #include "config/configuration.h"
 #include "coproc/ntp_context.h"
 #include "coproc/offset_storage_utils.h"
-#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
+#include "coproc/tests/fixtures/coproc_test_fixture.h"
 #include "model/namespace.h"
 #include "storage/api.h"
 #include "storage/snapshot.h"
@@ -23,10 +23,10 @@
 #include <chrono>
 #include <filesystem>
 
-class offset_keeper_fixture : public new_coproc_test_fixture {
+class offset_keeper_fixture : public coproc_test_fixture {
 public:
     offset_keeper_fixture()
-      : new_coproc_test_fixture() {
+      : coproc_test_fixture() {
         _smk.start().get();
     }
 

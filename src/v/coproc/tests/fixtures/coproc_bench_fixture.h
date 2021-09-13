@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
+#include "coproc/tests/fixtures/coproc_test_fixture.h"
 #include "model/fundamental.h"
 
 #include <absl/container/flat_hash_map.h>
@@ -21,7 +21,7 @@
 /// This harness brings up an entire redpanda fixture + the c++ implementation
 /// of the wasm engine. Use this fixture for when a complete end-to-end
 /// infrastructure is needed to perform some tests
-class coproc_bench_fixture : public new_coproc_test_fixture {
+class coproc_bench_fixture : public coproc_test_fixture {
 public:
     struct router_test_plan {
         struct options {

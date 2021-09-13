@@ -8,7 +8,7 @@
  * https://github.com/vectorizedio/redpanda/blob/master/licenses/rcl.md
  */
 
-#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
+#include "coproc/tests/fixtures/coproc_test_fixture.h"
 #include "coproc/tests/utils/coprocessor.h"
 #include "coproc/types.h"
 #include "kafka/client/transport.h"
@@ -19,13 +19,7 @@
 #include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test_log.hpp>
 
-static kafka::client::transport make_kafka_client() {
-    return kafka::client::transport(rpc::base_transport::configuration{
-      .server_addr = config::shard_local_cfg().kafka_api()[0].address,
-    });
-}
-
-FIXTURE_TEST(test_metadata_request, new_coproc_test_fixture) {
+FIXTURE_TEST(test_metadata_request, coproc_test_fixture) {
     model::topic input_topic("intpc1");
     model::topic output_topic = to_materialized_topic(
       input_topic, identity_coprocessor::identity_topic);
@@ -59,7 +53,7 @@ FIXTURE_TEST(test_metadata_request, new_coproc_test_fixture) {
       .data = {.topics = {{{output_topic}}}},
       .list_all_topics = false,
     };
-    auto client = make_kafka_client();
+    auto client = make_kafka_client().get();
     client.connect().get();
     auto resp = client.dispatch(req, kafka::api_version(4)).get0();
     client.stop().get();
@@ -70,7 +64,7 @@ FIXTURE_TEST(test_metadata_request, new_coproc_test_fixture) {
     BOOST_REQUIRE_EQUAL(resp.data.topics[0].partitions.size(), 1);
 }
 
-FIXTURE_TEST(test_read_from_materialized_topic, new_coproc_test_fixture) {
+FIXTURE_TEST(test_read_from_materialized_topic, coproc_test_fixture) {
     model::topic input_topic("foo");
     model::topic output_topic = to_materialized_topic(
       input_topic, identity_coprocessor::identity_topic);

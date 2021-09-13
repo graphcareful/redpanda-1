@@ -9,7 +9,7 @@
  */
 
 #include "coproc/logger.h"
-#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
+#include "coproc/tests/fixtures/coproc_test_fixture.h"
 #include "coproc/tests/utils/coprocessor.h"
 #include "model/namespace.h"
 #include "storage/tests/utils/random_batch.h"
@@ -21,7 +21,7 @@
 
 #include <chrono>
 
-class tip_fixture : public new_coproc_test_fixture {
+class tip_fixture : public coproc_test_fixture {
 public:
     std::optional<std::size_t> run(
       coproc::topic_ingestion_policy tip, std::size_t n, std::size_t drain_n) {

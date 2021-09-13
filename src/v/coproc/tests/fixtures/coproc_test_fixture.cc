@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Vectorized, Inc.
+ * Copyright 2021 Vectorized, Inc.
  *
  * Use of this software is governed by the Business Source License
  * included in the file licenses/BSL.md
@@ -13,7 +13,8 @@
 
 #include "config/configuration.h"
 #include "coproc/logger.h"
-#include "coproc/tests/fixtures/fixture_utils.h"
+#include "coproc/tests/utils/kafka_publish_consumer.h"
+#include "kafka/protocol/schemata/produce_request.h"
 #include "kafka/server/partition_proxy.h"
 #include "model/record_batch_reader.h"
 #include "model/timeout_clock.h"
@@ -39,12 +40,13 @@ std::unique_ptr<kafka::client::client> make_client() {
 
 } // namespace
 
-coproc_test_fixture::coproc_test_fixture() {
+coproc_test_fixture::coproc_test_fixture()
+  : supervisor_test_fixture()
+  , redpanda_thread_fixture() {
     ss::smp::invoke_on_all([]() {
         auto& config = config::shard_local_cfg();
         config.get("coproc_offset_flush_interval_ms").set_value(500ms);
     }).get0();
-    _root_fixture = std::make_unique<redpanda_thread_fixture>();
 }
 
 coproc_test_fixture::~coproc_test_fixture() {
@@ -94,114 +96,133 @@ coproc_test_fixture::disable_coprocessors(std::vector<uint64_t> ids) {
 }
 
 ss::future<> coproc_test_fixture::setup(log_layout_map llm) {
-    co_await _root_fixture->wait_for_controller_leadership();
+    co_await wait_for_controller_leadership();
     for (auto& p : llm) {
-        co_await _root_fixture->add_topic(
+        co_await add_topic(
           model::topic_namespace(model::kafka_namespace, p.first), p.second);
     }
+    _client = make_client();
     co_await _client->connect();
 }
 
-ss::future<> coproc_test_fixture::restart() {
+ss::future<std::vector<kafka::produce_response::partition>>
+coproc_test_fixture::produce(model::ntp ntp, model::record_batch_reader rbr) {
+    vlog(coproc::coproclog.info, "About to produce to ntp: {}", ntp);
+    auto results = co_await std::move(rbr).for_each_ref(
+      kafka_publish_consumer(
+        *_client, model::topic_partition{ntp.tp.topic, ntp.tp.partition}),
+      model::no_timeout);
+    for (const auto& r : results) {
+        vassert(
+          r.error_code != kafka::error_code::unknown_topic_or_partition,
+          "Coproc test harness expects input logs to already be in existance, "
+          "use setup() before starting your test");
+    }
+    co_return results;
+}
+
+ss::future<> coproc_test_fixture::wait_for_materialized(
+  model::ntp ntp, std::chrono::milliseconds timeout) {
+    const auto mgr_ntps = app.storage.local().log_mgr().get_all_ntps();
+    if (mgr_ntps.find(ntp) != mgr_ntps.end()) {
+        /// No need to wait, interested materialized partition exists
+        return ss::now();
+    }
+    auto p = ss::make_lw_shared<ss::promise<>>();
+    auto f = p->get_future();
+    auto id = ss::make_lw_shared<model::notification_id_type>();
+    *id = app.storage.local().log_mgr().register_manage_notification(
+      ntp, [p](storage::log) mutable { p->set_value(); });
+    auto to = ss::lowres_clock::now() + timeout;
+    return ss::with_timeout(to, std::move(f))
+      .handle_exception_type(
+        [this, ntp, id, p](const ss::timed_out_error&) mutable {
+            app.storage.local().log_mgr().unregister_manage_notification(*id);
+            p->set_exception(ss::timed_out_error());
+        })
+      .then([this, id]() {
+          app.storage.local().log_mgr().unregister_manage_notification(*id);
+      });
+}
+
+ss::future<ss::stop_iteration> coproc_test_fixture::fetch_partition(
+  model::record_batch_reader::data_t& events,
+  model::offset& o,
+  model::topic_partition tp,
+  std::chrono::milliseconds timeout) {
+    auto response = co_await _client->fetch_partition(tp, o, 64_KiB, timeout);
+    if (response.data.error_code != kafka::error_code::none) {
+        co_return ss::stop_iteration::yes;
+    }
+    vassert(response.data.topics.size() == 1, "Unexpected partition size");
+    auto& p = response.data.topics[0];
+    vassert(p.partitions.size() == 1, "Unexpected responses size");
+    auto& pr = p.partitions[0];
+    if (pr.error_code == kafka::error_code::none) {
+        auto crs = kafka::batch_reader(std::move(*pr.records));
+        while (!crs.empty()) {
+            auto kba = crs.consume_batch();
+            if (!kba.v2_format || !kba.valid_crc || !kba.batch) {
+                continue;
+            }
+            events.push_back(std::move(*kba.batch));
+            o = events.back().last_offset() + model::offset(1);
+        }
+    }
+    co_return ss::stop_iteration::no;
+};
+
+ss::future<model::record_batch_reader::data_t>
+coproc_test_fixture::do_consume_materialized(
+  model::ntp ntp,
+  std::size_t n_records,
+  model::offset offset,
+  std::chrono::milliseconds timeout) {
+    vlog(coproc::coproclog.info, "Making request to fetch from ntp: {}", ntp);
+    model::topic_partition tp{ntp.tp.topic, ntp.tp.partition};
+    model::record_batch_reader::data_t events;
+    ss::stop_iteration stop{};
+    const auto start_time = model::timeout_clock::now();
+    while (stop != ss::stop_iteration::yes && events.size() < n_records
+           && ((model::timeout_clock::now() - start_time) < timeout)) {
+        stop = co_await fetch_partition(events, offset, tp, timeout);
+    }
+    co_return events;
+}
+
+ss::future<model::record_batch_reader::data_t>
+coproc_test_fixture::consume_materialized(
+  model::ntp source,
+  model::ntp materialized,
+  std::size_t n_records,
+  model::offset offset,
+  std::chrono::milliseconds timeout) {
+    auto shard_id = app.shard_table.local().shard_for(source);
+    vassert(
+      shard_id,
+      "In coproc test harness source topics must be primed before test "
+      "start");
+    return app.storage
+      .invoke_on(
+        *shard_id,
+        [this, materialized, timeout](storage::api&) {
+            return wait_for_materialized(materialized, timeout);
+        })
+      .then([this, materialized, n_records, offset, timeout]() {
+          /// TODO: Try to conditionally perform the call to update_metadata
+          return _client->update_metadata().then(
+            [this, materialized, n_records, offset, timeout] {
+                return do_consume_materialized(
+                  materialized, n_records, offset, timeout);
+            });
+      });
+}
+
+ss::future<> restartable_coproc_test_fixture::restart() {
     auto data_dir = _root_fixture->data_dir;
     _root_fixture->remove_on_shutdown = false;
     _root_fixture = nullptr;
-    _root_fixture = std::make_unique<redpanda_thread_fixture>(
-      std::move(data_dir));
+    // _root_fixture = std::make_unique<coproc_test_fixture>(
+    //   std::move(data_dir));
     co_await _root_fixture->wait_for_controller_leadership();
-}
-
-ss::future<std::optional<ss::shard_id>>
-coproc_test_fixture::wait_for_ntp(model::ntp ntp) {
-    try {
-        co_return co_await tests::cooperative_spin_wait_with_timeout(
-          25s,
-          [this, ntp] {
-              return _root_fixture->app.shard_table.local()
-                .shard_for(ntp)
-                .has_value();
-          })
-          .then([this, ntp] {
-              return _root_fixture->app.shard_table.local().shard_for(ntp);
-          });
-    } catch (const std::exception& ex) {
-        vlog(coproc::coproclog.error, "Failed waiting for ntp: {}", ntp);
-    }
-    co_return std::nullopt;
-}
-
-ss::future<std::optional<model::record_batch_reader::data_t>>
-coproc_test_fixture::drain(
-  model::ntp ntp,
-  std::size_t limit,
-  model::offset offset,
-  model::timeout_clock::time_point timeout) {
-    auto shard_id = co_await wait_for_ntp(ntp);
-    if (!shard_id) {
-        vlog(
-          coproc::coproclog.info,
-          "No ntp exists {} cannot drain data from log: ",
-          ntp);
-    }
-    vlog(
-      coproc::coproclog.info,
-      "searching for ntp {} on shard id {} ...with value for limit: {}",
-      ntp,
-      *shard_id,
-      limit);
-    using ret_t = std::optional<model::record_batch_reader::data_t>;
-    auto& cache = _root_fixture->app.metadata_cache;
-    co_return co_await _root_fixture->app.partition_manager.invoke_on(
-      *shard_id,
-      [&cache, ntp, limit, offset, timeout](
-        cluster::partition_manager& pm) -> ss::future<ret_t> {
-          co_await tests::cooperative_spin_wait_with_timeout(
-            60s, [&pm, ntp] { return pm.log(ntp) != std::nullopt; });
-          auto partition = kafka::make_partition_proxy(ntp, cache.local(), pm);
-          if (!partition) {
-              co_return std::nullopt;
-          }
-          auto data = co_await do_drain(
-            offset,
-            limit,
-            timeout,
-            [partition = std::move(partition)](
-              model::offset next_offset) mutable {
-                return partition->make_reader(log_rdr_cfg(next_offset));
-            });
-          co_return ret_t(std::move(data));
-      });
-}
-
-ss::future<model::offset>
-coproc_test_fixture::push(model::ntp ntp, model::record_batch_reader rbr) {
-    auto shard_id = co_await wait_for_ntp(ntp);
-    if (!shard_id) {
-        vlog(
-          coproc::coproclog.error,
-          "No ntp exists, cannot push data to log: {}",
-          ntp);
-        co_return model::offset{-1};
-    }
-    vlog(
-      coproc::coproclog.info,
-      "Pushing record_batch_reader to ntp: {} on shard_id: {}",
-      ntp,
-      *shard_id);
-    co_return co_await _root_fixture->app.partition_manager.invoke_on(
-      *shard_id,
-      [ntp, rbr = std::move(rbr)](cluster::partition_manager& pm) mutable {
-          auto partition = pm.get(ntp);
-          return tests::cooperative_spin_wait_with_timeout(
-                   60s,
-                   [partition] { return partition && partition->is_leader(); })
-            .then([rbr = std::move(rbr), partition]() mutable {
-                return partition
-                  ->replicate(
-                    std::move(rbr),
-                    raft::replicate_options(
-                      raft::consistency_level::quorum_ack))
-                  .then([](auto r) { return r.value().last_offset; });
-            });
-      });
 }

@@ -8,7 +8,7 @@
  * https://github.com/vectorizedio/redpanda/blob/master/licenses/rcl.md
  */
 
-#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
+#include "coproc/tests/fixtures/coproc_test_fixture.h"
 #include "coproc/tests/utils/coprocessor.h"
 #include "coproc/types.h"
 #include "model/fundamental.h"
@@ -30,7 +30,7 @@ ss::future<std::size_t> number_of_logs(redpanda_thread_fixture* rtf) {
       std::plus<>());
 }
 
-FIXTURE_TEST(test_coproc_router_no_results, new_coproc_test_fixture) {
+FIXTURE_TEST(test_coproc_router_no_results, coproc_test_fixture) {
     // Note the original number of logs
     const std::size_t n_logs = number_of_logs(this).get0();
     // Storage has 10 ntps, 8 of topic 'bar' and 2 of 'foo'
@@ -77,7 +77,7 @@ model::record_batch_reader single_record_record_batch_reader() {
 
 /// Tests an off-by-one error where producing recordbatches of size 1 on the
 /// input log wouldn't produce onto the materialized log
-FIXTURE_TEST(test_coproc_router_off_by_one, new_coproc_test_fixture) {
+FIXTURE_TEST(test_coproc_router_off_by_one, coproc_test_fixture) {
     model::topic src_topic("obo");
     model::ntp input_ntp(
       model::kafka_namespace, src_topic, model::partition_id(0));
@@ -106,7 +106,7 @@ FIXTURE_TEST(test_coproc_router_off_by_one, new_coproc_test_fixture) {
     BOOST_CHECK_EQUAL(wr2, 1);
 }
 
-FIXTURE_TEST(test_coproc_router_double, new_coproc_test_fixture) {
+FIXTURE_TEST(test_coproc_router_double, coproc_test_fixture) {
     model::topic foo("foo");
     model::topic bar("bar");
     // Storage has 5 ntps, 4 of topic 'foo' and 1 of 'bar'
@@ -144,7 +144,7 @@ FIXTURE_TEST(test_coproc_router_double, new_coproc_test_fixture) {
     BOOST_CHECK_EQUAL(data.size(), 100);
 }
 
-FIXTURE_TEST(test_copro_auto_deregister_function, new_coproc_test_fixture) {
+FIXTURE_TEST(test_copro_auto_deregister_function, coproc_test_fixture) {
     model::topic foo("foo");
     setup({{foo, 24}}).get();
     auto id = coproc::script_id(497563);
