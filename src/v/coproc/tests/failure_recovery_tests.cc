@@ -8,7 +8,7 @@
  * https://github.com/vectorizedio/redpanda/blob/master/licenses/rcl.md
  */
 
-#include "coproc/tests/fixtures/coproc_test_fixture.h"
+#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
 #include "coproc/tests/utils/coprocessor.h"
 #include "model/fundamental.h"
 #include "model/namespace.h"
@@ -18,7 +18,7 @@
 
 #include <seastar/core/when_all.hh>
 
-FIXTURE_TEST(test_wasm_engine_restart, coproc_test_fixture) {
+FIXTURE_TEST(test_wasm_engine_restart, new_coproc_test_fixture) {
     model::topic single_input("plain_topic");
     setup({{single_input, 5}}).get();
     enable_coprocessors(
@@ -42,12 +42,14 @@ FIXTURE_TEST(test_wasm_engine_restart, coproc_test_fixture) {
 
     auto push_inputs =
       [this](const std::vector<model::ntp>& ntps) -> ss::future<> {
-        std::vector<ss::future<model::offset>> fs;
+        std::vector<ss::future<std::vector<kafka::produce_response::partition>>>
+          fs;
+        fs.reserve(ntps.size());
         for (const auto& ntp : ntps) {
-            fs.emplace_back(push(
+            fs.emplace_back(produce(
               ntp,
               storage::test::make_random_memory_record_batch_reader(
-                model::offset(0), 10, 2)));
+                model::offset(0), 10, 2, false)));
         }
         return ss::when_all_succeed(fs.begin(), fs.end()).discard_result();
     };
@@ -67,11 +69,12 @@ FIXTURE_TEST(test_wasm_engine_restart, coproc_test_fixture) {
     /// themselves have an at-least-once durability guarantee, so it would be
     /// more likely that a script processed a duplicate record. The wider the
     /// commit interval, the more likely this is.
-    std::vector<ss::future<std::optional<model::record_batch_reader::data_t>>>
-      fs;
-    for (const auto& ntp : outputs) {
-        fs.emplace_back(drain(ntp, 20));
+    std::vector<ss::future<model::record_batch_reader::data_t>> fs;
+    fs.reserve(outputs.size());
+    vassert(inputs.size() == outputs.size(), "Test inconsistency");
+    for (auto i = 0; i < outputs.size(); ++i) {
+        fs.emplace_back(consume_materialized(inputs[i], outputs[i], 20));
     }
     auto data = ss::when_all_succeed(fs.begin(), fs.end()).get0();
-    BOOST_CHECK(!data.empty() && data[0]);
+    BOOST_CHECK(!data.empty());
 }

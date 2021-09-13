@@ -8,7 +8,7 @@
  * https://github.com/vectorizedio/redpanda/blob/master/licenses/rcl.md
  */
 
-#include "coproc/tests/fixtures/coproc_test_fixture.h"
+#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
 #include "coproc/tests/utils/coprocessor.h"
 #include "coproc/types.h"
 #include "kafka/client/transport.h"
@@ -25,7 +25,7 @@ static kafka::client::transport make_kafka_client() {
     });
 }
 
-FIXTURE_TEST(test_metadata_request, coproc_test_fixture) {
+FIXTURE_TEST(test_metadata_request, new_coproc_test_fixture) {
     model::topic input_topic("intpc1");
     model::topic output_topic = to_materialized_topic(
       input_topic, identity_coprocessor::identity_topic);
@@ -45,14 +45,14 @@ FIXTURE_TEST(test_metadata_request, coproc_test_fixture) {
       .get();
 
     /// Deploy some data onto the input topic
-    push(
+    produce(
       input_ntp,
       storage::test::make_random_memory_record_batch_reader(
         model::offset(0), 4, 4))
       .get();
 
     /// Wait until the topic is available before making the kafka request
-    drain(output_ntp, 1).get();
+    consume_materialized(input_ntp, output_ntp, 1).get();
 
     /// Make a metadata request specifically for the materialized topic
     kafka::metadata_request req{
@@ -70,7 +70,7 @@ FIXTURE_TEST(test_metadata_request, coproc_test_fixture) {
     BOOST_REQUIRE_EQUAL(resp.data.topics[0].partitions.size(), 1);
 }
 
-FIXTURE_TEST(test_read_from_materialized_topic, coproc_test_fixture) {
+FIXTURE_TEST(test_read_from_materialized_topic, new_coproc_test_fixture) {
     model::topic input_topic("foo");
     model::topic output_topic = to_materialized_topic(
       input_topic, identity_coprocessor::identity_topic);
@@ -90,15 +90,15 @@ FIXTURE_TEST(test_read_from_materialized_topic, coproc_test_fixture) {
       .get();
 
     /// Deploy some data onto the input topic
-    push(
+    produce(
       input_ntp,
       storage::test::make_random_memory_record_batch_reader(
         model::offset(0), 4, 4))
       .get();
 
     // read the materialized topic from disk
-    const auto data = drain(output_ntp, 16).get0();
-    BOOST_REQUIRE(data);
+    const auto data = consume_materialized(input_ntp, output_ntp, 16).get0();
+    BOOST_REQUIRE(!data.empty());
 
     // Connect a kafka client to the expected output topic
     kafka::fetch_request req;

@@ -11,62 +11,42 @@
 
 #pragma once
 
-#include "coproc/tests/fixtures/coproc_test_fixture.h"
-#include "coproc/types.h"
+#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
+#include "model/fundamental.h"
+
+#include <absl/container/flat_hash_map.h>
+
+#include <vector>
 
 /// This harness brings up an entire redpanda fixture + the c++ implementation
 /// of the wasm engine. Use this fixture for when a complete end-to-end
 /// infrastructure is needed to perform some tests
-class coproc_bench_fixture : public coproc_test_fixture {
-private:
-    struct push_action_tag;
-    struct drain_action_tag;
-
+class coproc_bench_fixture : public new_coproc_test_fixture {
 public:
     struct router_test_plan {
         struct options {
-            std::size_t number_of_batches = 100;
-            std::size_t number_of_pushes = 1;
+            std::size_t number_of_batches{100};
+            std::size_t number_of_pushes{1};
         };
-        using all_opts = absl::flat_hash_map<model::ntp, options>;
-        all_opts input;
-        all_opts output;
+        using input_test_plan = absl::flat_hash_map<model::ntp, options>;
+        using output_test_plan
+          = absl::flat_hash_map<model::ntp, std::pair<model::ntp, options>>;
+
+        input_test_plan input;
+        output_test_plan output;
     };
+    using drain_results = absl::flat_hash_map<model::ntp, std::size_t>;
 
-    using push_results = absl::flat_hash_map<model::ntp, model::offset>;
-    using drain_results
-      = absl::flat_hash_map<model::ntp, std::pair<model::offset, std::size_t>>;
+    using copro_map
+      = absl::flat_hash_map<model::topic, std::vector<model::topic>>;
 
-    /// \brief Start the actual test, ensure that startup() has been called,
-    /// it initializes the storage layer and registers the coprocessors
-    ss::future<std::tuple<push_results, drain_results>>
+    ss::future<coproc_bench_fixture::drain_results>
       start_benchmark(router_test_plan);
 
-    /// \brief Builder for the structures needed to build a test plan
-    router_test_plan::all_opts build_simple_opts(log_layout_map, std::size_t);
+    router_test_plan
+      build_simple_opts(log_layout_map, copro_map, std::size_t, std::size_t);
 
 private:
-    template<typename T>
-    using action_results = std::conditional_t<
-      std::is_same_v<push_action_tag, T>,
-      push_results,
-      drain_results>;
-
-    template<typename T>
-    using results_mapped_t = typename action_results<T>::mapped_type;
-
-    template<typename ActionTag>
-    ss::future<action_results<ActionTag>> send_all(router_test_plan::all_opts);
-
-    template<
-      typename ActionTag,
-      typename ResultType = results_mapped_t<ActionTag>>
-    ss::future<ResultType>
-    send_n_times(const model::ntp&, router_test_plan::options);
-
-    template<
-      typename ActionTag,
-      typename ResultType = results_mapped_t<ActionTag>>
-    ss::future<>
-    do_action(const model::ntp&, std::size_t, std::size_t, ResultType&);
+    ss::future<> produce_all(router_test_plan::input_test_plan);
+    ss::future<drain_results> consume_all(router_test_plan::output_test_plan);
 };

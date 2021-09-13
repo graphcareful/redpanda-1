@@ -11,7 +11,7 @@
 #include "config/configuration.h"
 #include "coproc/ntp_context.h"
 #include "coproc/offset_storage_utils.h"
-#include "coproc/tests/fixtures/coproc_test_fixture.h"
+#include "coproc/tests/fixtures/new_coproc_test_fixture.h"
 #include "model/namespace.h"
 #include "storage/api.h"
 #include "storage/snapshot.h"
@@ -23,17 +23,17 @@
 #include <chrono>
 #include <filesystem>
 
-class offset_keeper_fixture : public coproc_test_fixture {
+class offset_keeper_fixture : public new_coproc_test_fixture {
 public:
     offset_keeper_fixture()
-      : coproc_test_fixture() {
+      : new_coproc_test_fixture() {
         _smk.start().get();
     }
 
     ~offset_keeper_fixture() override { _smk.stop().get(); }
 
     cluster::partition_manager& get_pm() {
-        return root_fixture()->app.partition_manager.local();
+        return app.partition_manager.local();
     }
 
     storage::simple_snapshot_manager& snapshot_mgr() {
@@ -47,7 +47,7 @@ public:
         return ss::parallel_for_each(
           r, [this, topic, fn = std::forward<Func>(make_reader_fn)](int32_t i) {
               model::record_batch_reader rbr = fn();
-              return push(
+              return produce(
                        model::ntp(
                          model::kafka_namespace, topic, model::partition_id(i)),
                        std::move(rbr))
@@ -55,14 +55,17 @@ public:
           });
     };
 
-    ss::future<> wait_on(const model::topic& topic, int32_t n_partitions) {
+    ss::future<> wait_on(
+      const model::topic& input,
+      const model::topic& topic,
+      int32_t n_partitions) {
         auto r = boost::irange<int32_t>(0, n_partitions);
-        return ss::parallel_for_each(r, [this, topic](int32_t i) {
-            return drain(
-                     model::ntp(
-                       model::kafka_namespace, topic, model::partition_id(i)),
-                     1)
-              .discard_result();
+        return ss::parallel_for_each(r, [this, input, topic](int32_t i) {
+            model::ntp src{
+              model::kafka_namespace, input, model::partition_id(i)};
+            model::ntp materialized{
+              model::kafka_namespace, topic, model::partition_id(i)};
+            return consume_materialized(src, materialized, 1).discard_result();
         });
     }
 
@@ -94,11 +97,11 @@ FIXTURE_TEST(offset_keeper_saved_offsets, offset_keeper_fixture) {
     setup({{foo, 50}, {bar, 50}}).get();
     push_all(foo, 50, []() {
         return storage::test::make_random_memory_record_batch_reader(
-          model::offset{0}, 5, 1);
+          model::offset{0}, 5, 1, false);
     }).get();
     push_all(bar, 50, []() {
         return storage::test::make_random_memory_record_batch_reader(
-          model::offset{0}, 10, 1);
+          model::offset{0}, 10, 1, false);
     }).get();
 
     using copro_typeid = coproc::registry::type_identifier;
@@ -114,11 +117,11 @@ FIXTURE_TEST(offset_keeper_saved_offsets, offset_keeper_fixture) {
       .get();
 
     wait_on(
-      to_materialized_topic(foo, identity_coprocessor::identity_topic), 50)
+      foo, to_materialized_topic(foo, identity_coprocessor::identity_topic), 50)
       .get();
 
     wait_on(
-      to_materialized_topic(bar, identity_coprocessor::identity_topic), 50)
+      foo, to_materialized_topic(bar, identity_coprocessor::identity_topic), 50)
       .get();
 
     /// Attempt to retrieve the data that should have been written to disk
