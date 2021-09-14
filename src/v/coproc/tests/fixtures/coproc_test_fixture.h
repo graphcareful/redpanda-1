@@ -11,6 +11,7 @@
 #pragma once
 #include "coproc/tests/fixtures/supervisor_test_fixture.h"
 #include "coproc/tests/utils/event_publisher.h"
+#include "kafka/client/client.h"
 #include "kafka/protocol/schemata/produce_response.h"
 #include "redpanda/tests/fixture.h"
 
@@ -36,6 +37,8 @@ public:
     /// Using encapsulation over inheritance so that the root fixture can be
     /// destroyed and re-initialized in the middle of a test
     coproc_test_fixture();
+
+    ~coproc_test_fixture() override;
 
     /// Higher level abstraction of 'publish_events'
     ///
@@ -76,12 +79,19 @@ public:
     coproc::wasm::event_publisher& get_publisher() { return _publisher; };
 
 protected:
+    ss::future<ss::stop_iteration> fetch_partition(
+      model::record_batch_reader::data_t&,
+      model::offset&,
+      model::topic_partition);
+
     redpanda_thread_fixture* root_fixture() {
         vassert(_root_fixture != nullptr, "Access root_fixture when null");
         return _root_fixture.get();
     }
 
 private:
+    std::unique_ptr<kafka::client::client> _client;
+
     coproc::wasm::event_publisher _publisher;
 
     std::unique_ptr<redpanda_thread_fixture> _root_fixture;
