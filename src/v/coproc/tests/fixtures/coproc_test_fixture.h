@@ -10,7 +10,6 @@
 
 #pragma once
 #include "coproc/tests/fixtures/supervisor_test_fixture.h"
-#include "coproc/tests/utils/event_publisher.h"
 #include "kafka/client/client.h"
 #include "kafka/protocol/schemata/produce_response.h"
 #include "redpanda/tests/fixture.h"
@@ -76,7 +75,7 @@ public:
       model::timeout_clock::time_point = model::timeout_clock::now()
                                          + std::chrono::seconds(5));
 
-    coproc::wasm::event_publisher& get_publisher() { return _publisher; };
+    kafka::client::client& get_client() { return *_client; }
 
 protected:
     ss::future<ss::stop_iteration> fetch_partition(
@@ -91,8 +90,6 @@ protected:
 
 private:
     std::unique_ptr<kafka::client::client> _client;
-
-    coproc::wasm::event_publisher _publisher;
 
     std::unique_ptr<redpanda_thread_fixture> _root_fixture;
 };
