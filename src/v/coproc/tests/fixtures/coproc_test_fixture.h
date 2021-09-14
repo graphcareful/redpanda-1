@@ -62,9 +62,12 @@ public:
     /// forced to read from the existing _data_dir to bootstrap
     ss::future<> restart();
 
-    /// \brief Write records to storage::api
-    ss::future<model::offset>
-    push(const model::ntp&, model::record_batch_reader);
+    /// \brief Produce batches via a kafka::client through the kafka layer
+    ///
+    /// Asserts that the partition exists before producing onto it, ensure they
+    /// are created by using the 'setup' method above
+    ss::future<std::vector<kafka::produce_response::partition>>
+      produce(model::ntp, model::record_batch_reader);
 
     /// \brief Consume batches via a kafka::client through the kafka layer
     ///

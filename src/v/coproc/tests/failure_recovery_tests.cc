@@ -42,12 +42,13 @@ FIXTURE_TEST(test_wasm_engine_restart, coproc_test_fixture) {
 
     auto push_inputs =
       [this](const std::vector<model::ntp>& ntps) -> ss::future<> {
-        std::vector<ss::future<model::offset>> fs;
+        std::vector<ss::future<std::vector<kafka::produce_response::partition>>>
+          fs;
         for (const auto& ntp : ntps) {
-            fs.emplace_back(push(
+            fs.emplace_back(produce(
               ntp,
               storage::test::make_random_memory_record_batch_reader(
-                model::offset(0), 10, 2)));
+                model::offset(0), 10, 2, false)));
         }
         return ss::when_all_succeed(fs.begin(), fs.end()).discard_result();
     };

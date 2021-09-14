@@ -45,10 +45,10 @@ FIXTURE_TEST(test_metadata_request, coproc_test_fixture) {
       .get();
 
     /// Deploy some data onto the input topic
-    push(
+    produce(
       input_ntp,
       storage::test::make_random_memory_record_batch_reader(
-        model::offset(0), 4, 4))
+        model::offset(0), 4, 4, false))
       .get();
 
     /// Make a metadata request specifically for the materialized topic

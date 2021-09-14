@@ -29,10 +29,10 @@ public:
           model::kafka_namespace, infoo, model::partition_id(0));
         setup({{infoo, 1}}).get();
 
-        push(
+        produce(
           infoo_ntp,
           storage::test::make_random_memory_record_batch_reader(
-            model::offset(0), n, 1))
+            model::offset(0), n, 1, false))
           .get();
 
         enable_coprocessors(
@@ -55,10 +55,10 @@ public:
                 std::logical_or<>());
         }).get();
 
-        push(
+        produce(
           infoo_ntp,
           storage::test::make_random_memory_record_batch_reader(
-            model::offset{0}, n, 1))
+            model::offset{0}, n, 1, false))
           .get();
 
         model::ntp output_ntp(
@@ -100,10 +100,10 @@ FIXTURE_TEST(test_copro_tip_stored, coproc_test_fixture) {
           .topics = {{sttp, tp_stored}}}}})
       .get();
 
-    push(
+    produce(
       sttp_ntp,
       storage::test::make_random_memory_record_batch_reader(
-        model::offset{0}, 40, 1))
+        model::offset{0}, 40, 1, false))
       .get();
 
     auto a_results = consume_materialized(sttp_ntp, output_ntp, 40).get();
@@ -113,7 +113,7 @@ FIXTURE_TEST(test_copro_tip_stored, coproc_test_fixture) {
     info("Restarting....");
     restart().get();
 
-    push(
+    produce(
       sttp_ntp,
       storage::test::make_random_memory_record_batch_reader(
         model::offset{0}, 40, 1))

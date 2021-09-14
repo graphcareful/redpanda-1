@@ -47,7 +47,7 @@ public:
         return ss::parallel_for_each(
           r, [this, topic, fn = std::forward<Func>(make_reader_fn)](int32_t i) {
               model::record_batch_reader rbr = fn();
-              return push(
+              return produce(
                        model::ntp(
                          model::kafka_namespace, topic, model::partition_id(i)),
                        std::move(rbr))
@@ -99,11 +99,11 @@ FIXTURE_TEST(offset_keeper_saved_offsets, offset_keeper_fixture) {
     setup({{foo, 50}, {bar, 50}}).get();
     push_all(foo, 50, []() {
         return storage::test::make_random_memory_record_batch_reader(
-          model::offset{0}, 5, 1);
+          model::offset{0}, 5, 1, false);
     }).get();
     push_all(foo, 50, []() {
         return storage::test::make_random_memory_record_batch_reader(
-          model::offset{0}, 10, 1);
+          model::offset{0}, 10, 1, false);
     }).get();
 
     using copro_typeid = coproc::registry::type_identifier;

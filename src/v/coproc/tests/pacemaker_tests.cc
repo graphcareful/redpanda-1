@@ -53,10 +53,10 @@ FIXTURE_TEST(test_coproc_router_no_results, coproc_test_fixture) {
     // Test -> Start pushing to registered topics and check that NO
     // materialized logs have been created
     model::ntp input_ntp(model::kafka_namespace, foo, model::partition_id(0));
-    push(
+    produce(
       input_ntp,
       storage::test::make_random_memory_record_batch_reader(
-        model::offset(0), 40, 1))
+        model::offset(0), 40, 1, false))
       .get();
 
     // Wait for any side-effects, ...expecting that none occur
@@ -96,7 +96,7 @@ FIXTURE_TEST(test_coproc_router_off_by_one, coproc_test_fixture) {
             src_topic, coproc::topic_ingestion_policy::stored)}}}})
       .get();
     auto fn = [this, input_ntp, output_ntp]() -> ss::future<size_t> {
-        return push(input_ntp, single_record_record_batch_reader())
+        return produce(input_ntp, single_record_record_batch_reader())
           .then([this, input_ntp, output_ntp](auto) {
               return consume_materialized(input_ntp, output_ntp, 1)
                 .then([input_ntp,
@@ -139,10 +139,10 @@ FIXTURE_TEST(test_coproc_router_double, coproc_test_fixture) {
       model::to_materialized_topic(foo, identity_coprocessor::identity_topic),
       model::partition_id(0));
 
-    auto f1 = push(
+    auto f1 = produce(
       input_ntp,
       storage::test::make_random_memory_record_batch_reader(
-        model::offset(0), 50, 1));
+        model::offset(0), 50, 1, false));
     auto f2 = consume_materialized(input_ntp, output_ntp, 100);
     auto read_batches
       = ss::when_all_succeed(std::move(f1), std::move(f2)).get();
@@ -166,12 +166,12 @@ FIXTURE_TEST(test_copro_auto_deregister_function, coproc_test_fixture) {
       .get();
 
     // Push some data across input topic....
-    std::vector<ss::future<model::offset>> fs;
+    std::vector<ss::future<std::vector<kafka::produce_response::partition>>> fs;
     for (auto i = 0; i < 24; ++i) {
-        fs.emplace_back(push(
+        fs.emplace_back(produce(
           model::ntp(model::kafka_namespace, foo, model::partition_id(i)),
           storage::test::make_random_memory_record_batch_reader(
-            model::offset(0), 10, 1)));
+            model::offset(0), 10, 1, false)));
     }
     ss::when_all_succeed(fs.begin(), fs.end()).get();
 
