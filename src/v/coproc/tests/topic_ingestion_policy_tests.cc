@@ -66,9 +66,8 @@ public:
           model::to_materialized_topic(
             infoo, identity_coprocessor::identity_topic),
           model::partition_id(0));
-        auto r = drain(output_ntp, drain_n).get();
-        return !r.has_value() ? std::nullopt
-                              : std::optional<std::size_t>(r->size());
+        auto r = consume_materialized(infoo_ntp, output_ntp, drain_n).get();
+        return r.size();
     }
 };
 
@@ -107,9 +106,8 @@ FIXTURE_TEST(test_copro_tip_stored, coproc_test_fixture) {
         model::offset{0}, 40, 1))
       .get();
 
-    auto a_results = drain(output_ntp, 40).get();
-    BOOST_CHECK(a_results);
-    BOOST_CHECK(a_results->size() == 40);
+    auto a_results = consume_materialized(sttp_ntp, output_ntp, 40).get();
+    BOOST_CHECK(a_results.size() == 40);
 
     ss::sleep(1s).get();
     info("Restarting....");
@@ -121,7 +119,6 @@ FIXTURE_TEST(test_copro_tip_stored, coproc_test_fixture) {
         model::offset{0}, 40, 1))
       .get();
 
-    auto results = drain(output_ntp, 80).get();
-    BOOST_CHECK(results);
-    BOOST_CHECK(results->size() >= 80);
+    auto results = consume_materialized(sttp_ntp, output_ntp, 80).get();
+    BOOST_CHECK(results.size() >= 80);
 }

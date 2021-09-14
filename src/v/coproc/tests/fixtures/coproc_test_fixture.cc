@@ -136,8 +136,9 @@ ss::future<> coproc_test_fixture::wait_for_materialized(
 ss::future<ss::stop_iteration> coproc_test_fixture::fetch_partition(
   model::record_batch_reader::data_t& events,
   model::offset& o,
-  model::topic_partition tp) {
-    auto response = co_await _client->fetch_partition(tp, o, 64_KiB, 1000ms);
+  model::topic_partition tp,
+  std::chrono::milliseconds timeout) {
+    auto response = co_await _client->fetch_partition(tp, o, 64_KiB, timeout);
     if (response.data.error_code != kafka::error_code::none) {
         co_return ss::stop_iteration::yes;
     }
@@ -158,24 +159,50 @@ ss::future<ss::stop_iteration> coproc_test_fixture::fetch_partition(
     co_return ss::stop_iteration::no;
 };
 
-ss::future<std::optional<model::record_batch_reader::data_t>>
-coproc_test_fixture::drain(
-  const model::ntp& ntp,
-  std::size_t limit,
+ss::future<model::record_batch_reader::data_t>
+coproc_test_fixture::do_consume_materialized(
+  model::ntp ntp,
+  std::size_t n_records,
   model::offset offset,
-  model::timeout_clock::time_point timeout) {
-    co_await _client->update_metadata();
+  std::chrono::milliseconds timeout) {
     vlog(coproc::coproclog.info, "Making request to fetch from ntp: {}", ntp);
     model::topic_partition tp{ntp.tp.topic, ntp.tp.partition};
     model::record_batch_reader::data_t events;
     ss::stop_iteration stop{};
-    auto start_time = model::timeout_clock::now();
-    while ((stop != ss::stop_iteration::yes) && (events.size() < limit)
-           && (start_time < timeout)) {
-        stop = co_await fetch_partition(events, offset, tp);
-        auto start_time = model::timeout_clock::now();
+    const auto start_time = model::timeout_clock::now();
+    while (stop != ss::stop_iteration::yes && events.size() < n_records
+           && ((model::timeout_clock::now() - start_time) < timeout)) {
+        stop = co_await fetch_partition(events, offset, tp, timeout);
     }
     co_return events;
+}
+
+ss::future<model::record_batch_reader::data_t>
+coproc_test_fixture::consume_materialized(
+  model::ntp source,
+  model::ntp materialized,
+  std::size_t n_records,
+  model::offset offset,
+  std::chrono::milliseconds timeout) {
+    auto shard_id = _root_fixture->app.shard_table.local().shard_for(source);
+    vassert(
+      shard_id,
+      "In coproc test harness source topics must be primed before test "
+      "start");
+    return _root_fixture->app.storage
+      .invoke_on(
+        *shard_id,
+        [this, materialized, timeout](storage::api&) {
+            return wait_for_materialized(materialized, timeout);
+        })
+      .then([this, materialized, n_records, offset, timeout]() {
+          /// TODO: Try to conditionally perform the call to update_metadata
+          return _client->update_metadata().then(
+            [this, materialized, n_records, offset, timeout] {
+                return do_consume_materialized(
+                  materialized, n_records, offset, timeout);
+            });
+      });
 }
 
 ss::future<model::offset> coproc_test_fixture::push(

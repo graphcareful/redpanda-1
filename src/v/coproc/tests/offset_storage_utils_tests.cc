@@ -55,10 +55,15 @@ public:
           });
     };
 
-    ss::future<> wait_on(const model::topic& topic, int32_t n_partitions) {
+    ss::future<> wait_on(
+      const model::topic& src,
+      const model::topic& topic,
+      int32_t n_partitions) {
         auto r = boost::irange<int32_t>(0, n_partitions);
-        return ss::parallel_for_each(r, [this, topic](int32_t i) {
-            return drain(
+        return ss::parallel_for_each(r, [this, src, topic](int32_t i) {
+            return consume_materialized(
+                     model::ntp(
+                       model::kafka_namespace, src, model::partition_id(i)),
                      model::ntp(
                        model::kafka_namespace, topic, model::partition_id(i)),
                      1)
@@ -114,6 +119,7 @@ FIXTURE_TEST(offset_keeper_saved_offsets, offset_keeper_fixture) {
       .get();
 
     wait_on(
+      foo,
       model::to_materialized_topic(foo, identity_coprocessor::identity_topic),
       50)
       .get();

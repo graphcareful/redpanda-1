@@ -66,22 +66,20 @@ public:
     ss::future<model::offset>
     push(const model::ntp&, model::record_batch_reader);
 
-    /// \brief Read records from storage::api up until 'limit' or 'time'
-    /// starting at 'offset'
-    ss::future<std::optional<model::record_batch_reader::data_t>> drain(
-      const model::ntp&,
-      std::size_t,
-      model::offset = model::offset(0),
-      model::timeout_clock::time_point = model::timeout_clock::now()
-                                         + std::chrono::seconds(5));
-
-    kafka::client::client& get_client() { return *_client; }
+    /// \brief Consume batches via a kafka::client through the kafka layer
+    ///
+    /// Consumes materialized partitions, contains a mechanism to wait for their
+    /// existance (with a timeout) if materialized partition doesn't yet exist
+    /// at time of call to this method
+    ss::future<model::record_batch_reader::data_t> consume_materialized(
+      model::ntp source,
+      model::ntp materialized,
+      std::size_t n_records,
+      model::offset offset = model::offset(0),
+      std::chrono::milliseconds timeout = std::chrono::milliseconds(5000));
 
 protected:
-    ss::future<ss::stop_iteration> fetch_partition(
-      model::record_batch_reader::data_t&,
-      model::offset&,
-      model::topic_partition);
+    kafka::client::client& get_client() { return *_client; }
 
     redpanda_thread_fixture* root_fixture() {
         vassert(_root_fixture != nullptr, "Access root_fixture when null");
@@ -89,6 +87,15 @@ protected:
     }
 
 private:
+    ss::future<model::record_batch_reader::data_t> do_consume_materialized(
+      model::ntp, std::size_t, model::offset, std::chrono::milliseconds);
+
+    ss::future<ss::stop_iteration> fetch_partition(
+      model::record_batch_reader::data_t&,
+      model::offset&,
+      model::topic_partition,
+      std::chrono::milliseconds);
+
     ss::future<> wait_for_materialized(model::ntp, std::chrono::milliseconds);
 
 private:
