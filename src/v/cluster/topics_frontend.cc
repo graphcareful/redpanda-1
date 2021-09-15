@@ -633,6 +633,9 @@ ss::future<topic_result> topics_frontend::do_create_partition(
     if (!tp_cfg) {
         co_return make_error_result(p_cfg.tp_ns, errc::topic_not_exists);
     }
+    if (is_topic_materialized(*tp_cfg)) {
+        co_return make_error_result(p_cfg.tp_ns, errc::topic_operation_error);
+    }
     auto units = co_await _allocator.invoke_on(
       partition_allocator::shard,
       [p_cfg, rf = tp_cfg->replication_factor](partition_allocator& al) {
