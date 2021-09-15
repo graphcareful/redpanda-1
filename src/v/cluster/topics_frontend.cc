@@ -520,6 +520,15 @@ ss::future<std::error_code> topics_frontend::move_partition_replicas(
   model::ntp ntp,
   std::vector<model::broker_shard> new_replica_set,
   model::timeout_clock::time_point tout) {
+    auto tp_cfg = _topics.local().get_topic_cfg(
+      model::topic_namespace_view{ntp});
+    if (!tp_cfg) {
+        return ss::make_ready_future<std::error_code>(errc::topic_not_exists);
+    }
+    if (is_topic_materialized(*tp_cfg)) {
+        return ss::make_ready_future<std::error_code>(
+          errc::topic_operation_error);
+    }
     move_partition_replicas_cmd cmd(std::move(ntp), std::move(new_replica_set));
 
     return replicate_and_wait(_stm, _as, std::move(cmd), tout);
