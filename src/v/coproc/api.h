@@ -44,6 +44,11 @@ private:
 
     // Event handlers
     std::unique_ptr<wasm::async_event_handler> _wasm_async_handler;
+
+    wasm::script_database _sdb; /// one instance
+    wasm::script_dispatcher _dispatcher{
+      _pacemaker, _sdb, _as};                    /// one instance;
+    wasm::event_listener _listener{_dispatcher}; /// one instance
 };
 
 } // namespace coproc

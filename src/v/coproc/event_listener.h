@@ -75,6 +75,9 @@ private:
 
     absl::flat_hash_map<event_type, event_handler*>
       _handlers; // size of this map will be 3
+
+    /// Used to make requests to the wasm engine
+    script_dispatcher& _dispatcher;
 };
 
 } // namespace coproc::wasm
