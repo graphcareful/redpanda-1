@@ -63,7 +63,8 @@ enum class errc {
     topic_does_not_exist,
     invalid_topic,
     materialized_topic,
-    script_id_does_not_exist
+    script_id_does_not_exist,
+    partition_has_pending_update
 };
 
 struct errc_category final : public std::error_category {
@@ -83,6 +84,8 @@ struct errc_category final : public std::error_category {
             return "Topic is already a materialized topic";
         case errc::script_id_does_not_exist:
             return "Could not find coprocessor with matching script_id";
+        case errc::partition_has_pending_update:
+            return "attempted to move a partition that is already pending";
         default:
             return "Undefined coprocessor error encountered";
         }
