@@ -89,6 +89,20 @@ public:
     ss::future<absl::btree_map<script_id, errc>> remove_all_sources();
 
     /**
+     * Restarts a partition from offset 0. Useful after source partition is
+     * moved
+     */
+    ss::future<errc>
+      restart_partition(script_id, topic_ingestion_policy, model::ntp);
+
+    /**
+     * Removes partition from any active scripts that may be processing it
+     *
+     * @returns Ids of scripts that were reading from this partition
+     */
+    ss::future<errc> shutdown_partition(model::ntp);
+
+    /**
      * @returns true if a matching script id exists on 'this' shard
      */
     bool local_script_id_exists(script_id);
@@ -105,6 +119,8 @@ private:
       ntp_context_cache&,
       std::vector<errc>& acks,
       const std::vector<topic_namespace_policy>&);
+
+    void install_failure_handler(script_id);
 
     struct offset_flush_fiber_state {
         ss::timer<ss::lowres_clock> timer;

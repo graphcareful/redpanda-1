@@ -131,6 +131,11 @@ std::vector<errc> pacemaker::add_source(
     const auto [_, success] = _scripts.emplace(id, std::move(script_ctx));
     vassert(success, "Double coproc insert detected");
     vlog(coproclog.debug, "Adding source with id: {}", id);
+    install_failure_handler(id);
+    return acks;
+}
+
+void pacemaker::install_failure_handler(script_id id) {
     (void)ss::with_gate(_gate, [this, id] {
         auto found = _scripts.find(id);
         if (found == _scripts.end()) {
@@ -149,12 +154,13 @@ std::vector<errc> pacemaker::add_source(
                 "expected: {}",
                 e.get_id(),
                 id);
+              /// TODO: Poses interesting issue, now that there is a script
+              /// database, entry is in the db but not 'running'
               return container().invoke_on_all([id](pacemaker& p) {
                   return p.remove_source(id).discard_result();
               });
           });
     });
-    return acks;
 }
 
 static void set_start_offset(
@@ -219,6 +225,53 @@ ss::future<errc> pacemaker::remove_source(script_id id) {
     absl::erase_if(_ntps, [](const ntp_context_cache::value_type& p) {
         return p.second.use_count() == 1;
     });
+    co_return errc::success;
+}
+
+ss::future<errc> pacemaker::restart_partition(
+  script_id id, topic_ingestion_policy policy, model::ntp ntp) {
+    auto partition = _shared_res.rs.partition_manager.local().get(ntp);
+    if (!partition) {
+        throw std::runtime_error(fmt::format(
+          "Attempted to restart_partition when partition doesn't exist: {}",
+          ntp));
+    }
+    auto found = _scripts.find(id);
+    if (found != _scripts.end()) {
+        auto ntp_found = _ntps.find(ntp);
+        vassert(ntp_found != _ntps.end(), "State inconsistency detected");
+        co_return co_await found->second->start_processing_ntp(
+          ntp, ntp_found->second);
+    }
+    auto ntp_ctx = ss::make_lw_shared<ntp_context>(partition);
+    set_start_offset(id, ntp_ctx, policy);
+    ntp_context_cache ctxs{{ntp, std::move(ntp_ctx)}};
+    auto script_ctx = std::make_unique<script_context>(
+      id, _shared_res, std::move(ctxs));
+    _scripts.emplace(id, std::move(script_ctx));
+    install_failure_handler(id);
+    co_return errc::success;
+}
+
+ss::future<errc> pacemaker::shutdown_partition(model::ntp target) {
+    std::vector<ss::future<errc>> fs;
+    std::vector<script_id> ids;
+    for (const auto& [ntp, ctx] : _ntps) {
+        for (const auto& [id, _] : ctx->offsets) {
+            auto found = _scripts.find(id);
+            vassert(
+              found != _scripts.end(),
+              "State inconsistency detected within coproc");
+            fs.push_back(found->second->stop_processing_ntp(target));
+            ids.push_back(id);
+        }
+    }
+    auto results = co_await ss::when_all_succeed(fs.begin(), fs.end());
+    for (errc e : results) {
+        if (e != errc::success) {
+            co_return e;
+        }
+    }
     co_return errc::success;
 }
 
