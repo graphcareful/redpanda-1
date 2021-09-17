@@ -104,6 +104,35 @@ ss::future<> coproc_test_fixture::restart() {
     co_await _root_fixture->wait_for_controller_leadership();
 }
 
+ss::future<> coproc_test_fixture::wait_for_materialized(
+  model::ntp ntp, std::chrono::milliseconds timeout) {
+    const auto mgr_ntps
+      = _root_fixture->app.storage.local().log_mgr().get_all_ntps();
+    if (mgr_ntps.find(ntp) != mgr_ntps.end()) {
+        /// No need to wait, interested materialized partition exists
+        return ss::now();
+    }
+    auto p = ss::make_lw_shared<ss::promise<>>();
+    auto f = p->get_future();
+    auto id = ss::make_lw_shared<model::notification_id_type>(
+      _root_fixture->app.storage.local().log_mgr().register_manage_notification(
+        ntp, [p](storage::log) mutable { p->set_value(); }));
+    auto to = ss::lowres_clock::now() + timeout;
+    return ss::with_timeout(to, std::move(f))
+      .handle_exception_type(
+        [this, ntp, id, p](const ss::timed_out_error&) mutable {
+            _root_fixture->app.storage.local()
+              .log_mgr()
+              .unregister_manage_notification(*id);
+            p->set_exception(ss::timed_out_error());
+        })
+      .then([this, id]() {
+          _root_fixture->app.storage.local()
+            .log_mgr()
+            .unregister_manage_notification(*id);
+      });
+}
+
 ss::future<ss::stop_iteration> coproc_test_fixture::fetch_partition(
   model::record_batch_reader::data_t& events,
   model::offset& o,

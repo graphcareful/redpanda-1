@@ -89,6 +89,9 @@ protected:
     }
 
 private:
+    ss::future<> wait_for_materialized(model::ntp, std::chrono::milliseconds);
+
+private:
     std::unique_ptr<kafka::client::client> _client;
 
     std::unique_ptr<redpanda_thread_fixture> _root_fixture;
