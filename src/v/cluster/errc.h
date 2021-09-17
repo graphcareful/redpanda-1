@@ -53,7 +53,7 @@ enum class errc : int16_t {
     partition_configuration_differs,
     data_policy_already_exists,
     data_policy_not_exists,
-
+    materialized_source_topic_not_exists
 };
 struct errc_category final : public std::error_category {
     const char* name() const noexcept final { return "cluster::errc"; }
@@ -144,6 +144,9 @@ struct errc_category final : public std::error_category {
             return "Data-policy already exists";
         case errc::data_policy_not_exists:
             return "Data-policy does not exist";
+        case errc::materialized_source_topic_not_exists:
+            return "Attempted to create a materialized log for a source topic "
+                   "that does not exist";
         }
         return "cluster::errc::unknown";
     }
