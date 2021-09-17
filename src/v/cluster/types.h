@@ -586,6 +586,14 @@ struct create_data_policy_cmd_data {
     v8_engine::data_policy dp;
 };
 
+struct create_materialized_topic_cmd_data {
+    static constexpr int8_t current_version = 1;
+    model::topic_namespace source;
+    model::topic_namespace materialized;
+};
+std::ostream&
+operator<<(std::ostream&, const create_materialized_topic_cmd_data&);
+
 enum class reconciliation_status : int8_t {
     done,
     in_progress,
@@ -770,6 +778,12 @@ template<>
 struct adl<cluster::create_data_policy_cmd_data> {
     void to(iobuf&, cluster::create_data_policy_cmd_data&&);
     cluster::create_data_policy_cmd_data from(iobuf_parser&);
+};
+
+template<>
+struct adl<cluster::create_materialized_topic_cmd_data> {
+    void to(iobuf& out, cluster::create_materialized_topic_cmd_data&&);
+    cluster::create_materialized_topic_cmd_data from(iobuf_parser&);
 };
 
 } // namespace reflection

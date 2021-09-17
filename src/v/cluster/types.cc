@@ -240,6 +240,16 @@ std::ostream& operator<<(std::ostream& o, const backend_operation& op) {
     return o;
 }
 
+std::ostream&
+operator<<(std::ostream& o, const create_materialized_topic_cmd_data& d) {
+    fmt::print(
+      o,
+      "{{Source topic: {}, materialized topic: {}}}",
+      d.source,
+      d.materialized);
+    return o;
+}
+
 std::ostream& operator<<(std::ostream& o, const reconciliation_status& s) {
     switch (s) {
     case reconciliation_status::done:
@@ -795,6 +805,29 @@ adl<cluster::create_data_policy_cmd_data>::from(iobuf_parser& in) {
       cluster::create_data_policy_cmd_data::current_version);
     auto dp = adl<v8_engine::data_policy>{}.from(in);
     return cluster::create_data_policy_cmd_data{.dp = std::move(dp)};
+}
+
+void adl<cluster::create_materialized_topic_cmd_data>::to(
+  iobuf& out, cluster::create_materialized_topic_cmd_data&& cm_cmd_data) {
+    return serialize(
+      out,
+      cm_cmd_data.current_version,
+      std::move(cm_cmd_data.source),
+      std::move(cm_cmd_data.materialized));
+}
+
+cluster::create_materialized_topic_cmd_data
+adl<cluster::create_materialized_topic_cmd_data>::from(iobuf_parser& in) {
+    auto version = adl<int8_t>{}.from(in);
+    vassert(
+      version == cluster::create_materialized_topic_cmd_data::current_version,
+      "Unexpected version: {} (expected: {})",
+      version,
+      cluster::create_materialized_topic_cmd_data::current_version);
+    auto source = adl<model::topic_namespace>{}.from(in);
+    auto materialzied = adl<model::topic_namespace>{}.from(in);
+    return cluster::create_materialized_topic_cmd_data{
+      .source = std::move(source), .materialized = std::move(materialzied)};
 }
 
 } // namespace reflection

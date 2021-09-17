@@ -242,6 +242,61 @@ ss::future<topic_result> topics_frontend::do_update_topic_properties(
     }
 }
 
+ss::future<topic_result> topics_frontend::do_create_materialized_topic(
+  create_materialized_topic_cmd_data data,
+  model::timeout_clock::time_point timeout) {
+    if (!validate_topic_name(data.materialized)) {
+        co_return topic_result(
+          topic_result(std::move(data.materialized), errc::invalid_topic_name));
+    }
+
+    create_materialized_topic_cmd cmd(data, 0);
+    try {
+        auto ec = co_await replicate_and_wait(
+          _stm, _as, std::move(cmd), timeout);
+        co_return topic_result(data.materialized, map_errc(ec));
+    } catch (const std::exception& ex) {
+        vlog(
+          clusterlog.warn,
+          "unable to create materialized topic {} - source topic - {} reason: "
+          "{}",
+          data.materialized,
+          data.source,
+          ex.what());
+        co_return topic_result(
+          std::move(data.materialized), errc::replication_error);
+    }
+}
+
+ss::future<std::vector<topic_result>>
+topics_frontend::create_materialized_topics(
+  std::vector<create_materialized_topic_cmd_data> topics,
+  model::timeout_clock::time_point timeout) {
+    vlog(clusterlog.trace, "Create materialized topics {}", topics);
+    std::vector<ss::future<topic_result>> futures;
+    futures.reserve(topics.size());
+
+    std::transform(
+      std::begin(topics),
+      std::end(topics),
+      std::back_inserter(futures),
+      [this, timeout](create_materialized_topic_cmd_data& d) {
+          return do_create_materialized_topic(std::move(d), timeout);
+      });
+
+    return ss::when_all_succeed(futures.begin(), futures.end())
+      .then([this, timeout](std::vector<topic_result> results) {
+          if (needs_linearizable_barrier(results)) {
+              return stm_linearizable_barrier(timeout).then(
+                [results = std::move(results)](result<model::offset>) mutable {
+                    return results;
+                });
+          }
+          return ss::make_ready_future<std::vector<topic_result>>(
+            std::move(results));
+      });
+}
+
 topic_result
 make_error_result(const model::topic_namespace& tp_ns, std::error_code ec) {
     if (ec.category() == cluster::error_category()) {
