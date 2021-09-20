@@ -9,6 +9,8 @@
 
 #include "cluster/partition_leaders_table.h"
 
+#include "cluster/cluster_utils.h"
+#include "cluster/topic_table.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
 #include "utils/expiring_promise.h"
@@ -18,6 +20,10 @@
 #include <optional>
 
 namespace cluster {
+
+partition_leaders_table::partition_leaders_table(
+  ss::sharded<topic_table>& topic_table)
+  : _topic_table(topic_table) {}
 
 ss::future<> partition_leaders_table::stop() {
     while (!_leader_promises.empty()) {
@@ -33,9 +39,19 @@ ss::future<> partition_leaders_table::stop() {
 
 std::optional<model::node_id> partition_leaders_table::get_leader(
   model::topic_namespace_view tp_ns, model::partition_id pid) const {
+    const auto& topics_map = _topic_table.local().topics_map();
     if (auto it = _leaders.find(leader_key_view{tp_ns, pid});
         it != _leaders.end()) {
         return it->second.id;
+    } else if (auto it = topics_map.find(tp_ns); it != topics_map.end()) {
+        // Possible leadership query for materialized topic, search for it
+        // in the topics table.
+        const auto& parent_topic = it->second.source_topic;
+        if (parent_topic) {
+            // Leadership properties of materialzed topic are that of its parent
+            return get_leader(
+              model::topic_namespace_view{tp_ns.ns, *parent_topic}, pid);
+        }
     }
     return std::nullopt;
 }
