@@ -104,6 +104,44 @@ public:
         client.stop().then([&client] { client.shutdown(); }).get();
     }
 
+    void test_create_materialized_topic(
+      model::topic src, kafka::create_topics_request req) {
+        std::vector<cluster::create_materialized_topic_cmd_data> materialized;
+        std::transform(
+          req.data.topics.begin(),
+          req.data.topics.end(),
+          std::back_inserter(materialized),
+          [&src](const kafka::creatable_topic& t) {
+              return cluster::create_materialized_topic_cmd_data{
+                .source = model::topic_namespace{model::kafka_namespace, src},
+                .materialized = model::topic_namespace{
+                  model::kafka_namespace, t.name}};
+          });
+
+        // Creating a materialized topic is not part of the kafka API
+        // Must do this through the cluster::topics_frontend class
+        auto& topics_frontend = app.controller->get_topics_frontend();
+        const auto resp = topics_frontend.local()
+                            .create_materialized_topics(
+                              std::move(materialized), model::no_timeout)
+                            .get();
+        BOOST_TEST(
+          std::all_of(
+            std::cbegin(resp),
+            std::cend(resp),
+            [](const cluster::topic_result& t) {
+                return t.ec == cluster::errc::success;
+            }),
+          fmt::format("expected no errors. received response: {}", resp));
+
+        auto client = make_kafka_client().get0();
+        client.connect().get();
+        for (auto& topic : req.data.topics) {
+            verify_metadata(client, req, topic);
+        }
+        client.stop().then([&client] { client.shutdown(); }).get();
+    }
+
     void verify_metadata(
       kafka::client::transport& client,
       kafka::create_topics_request& create_req,
@@ -193,6 +231,8 @@ FIXTURE_TEST_EXPECTED_FAILURES(create_topics, create_topic_fixture, 2) {
     wait_for_controller_leadership().get();
 
     test_create_topic(make_req({make_topic("topic1")}));
+    test_create_materialized_topic(
+      model::topic("topic1"), make_req({make_topic("topic2")}));
 
     // FIXME: these all crash with undefined behavior
 #if 0
