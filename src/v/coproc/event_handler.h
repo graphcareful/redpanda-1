@@ -83,8 +83,6 @@ private:
     /// Pass it tot script_dispatcher
     ss::abort_source& _abort_source;
 
-    ss::gate _gate;
-
     /// Used to make requests to the wasm engine
     script_dispatcher _dispatcher;
 };

@@ -11,7 +11,6 @@
 #include "coproc/event_handler.h"
 
 #include "coproc/ntp_context.h"
-#include "utils/gate_guard.h"
 #include "vlog.h"
 
 namespace coproc::wasm {
@@ -23,11 +22,10 @@ async_event_handler::async_event_handler(
 
 ss::future<> async_event_handler::start() { co_return; }
 
-ss::future<> async_event_handler::stop() { return _gate.close(); }
+ss::future<> async_event_handler::stop() { co_return; }
 
 ss::future<event_handler::cron_finish_status>
 async_event_handler::preparation_before_process() {
-    gate_guard guard{_gate};
     auto heartbeat = co_await _dispatcher.heartbeat();
     if (heartbeat.has_error()) {
         std::error_code err = heartbeat.error();
@@ -60,7 +58,6 @@ async_event_handler::preparation_before_process() {
 
 ss::future<>
 async_event_handler::process(absl::btree_map<script_id, parsed_event> wsas) {
-    gate_guard guard{_gate};
     std::vector<enable_copros_request::data> enables;
     std::vector<script_id> disables;
     for (auto& [id, event] : wsas) {
