@@ -159,11 +159,15 @@ script_dispatcher::add_sources(
     });
 }
 
+static rpc::client_opts wasm_client_opts() {
+    return rpc::client_opts(model::timeout_clock::now() + 5s);
+}
+
 ss::future<result<std::vector<script_id>>>
 script_dispatcher::enable_coprocessors(
   supervisor_client_protocol client, enable_copros_request req) {
     auto reply = co_await client.enable_coprocessors(
-      std::move(req), rpc::client_opts(model::no_timeout));
+      std::move(req), wasm_client_opts());
     if (!reply) {
         co_return reply.error();
     }
@@ -224,7 +228,7 @@ script_dispatcher::enable_coprocessors(
         vlog(coproclog.error, "Immediately deregistering ids {}", deregisters);
         auto req = disable_copros_request({.ids = std::move(deregisters)});
         auto reply = co_await client.disable_coprocessors(
-          std::move(req), rpc::client_opts(model::no_timeout));
+          std::move(req), wasm_client_opts());
         if (!reply) {
             vlog(
               coproclog.error,
@@ -245,7 +249,7 @@ ss::future<result<std::vector<script_id>>>
 script_dispatcher::disable_coprocessors(
   supervisor_client_protocol client, disable_copros_request req) {
     auto reply = co_await client.disable_coprocessors(
-      std::move(req), rpc::client_opts(model::no_timeout));
+      std::move(req), wasm_client_opts());
     if (!reply) {
         co_return reply.error();
     }
@@ -280,7 +284,7 @@ script_dispatcher::disable_all_coprocessors(supervisor_client_protocol client) {
         size_t n_script_dnes{0};
     };
     auto reply = co_await client.disable_all_coprocessors(
-      empty_request(), rpc::client_opts(model::no_timeout));
+      empty_request(), wasm_client_opts());
     if (!reply) {
         co_return reply.error();
     }
