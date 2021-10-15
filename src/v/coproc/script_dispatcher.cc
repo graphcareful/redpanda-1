@@ -149,8 +149,7 @@ ss::future<bool> script_dispatcher::script_exists(script_id id) {
 }
 
 script_dispatcher::script_dispatcher(ss::sharded<pacemaker>& p) noexcept
-  : _pacemaker(p)
-  , _transport(_pacemaker.local().resources().transport) {}
+  : _pacemaker(p) {}
 
 ss::future<std::vector<std::vector<coproc::errc>>>
 script_dispatcher::add_sources(
@@ -161,12 +160,9 @@ script_dispatcher::add_sources(
 }
 
 ss::future<result<std::vector<script_id>>>
-script_dispatcher::enable_coprocessors(enable_copros_request req) {
-    auto client = co_await get_client();
-    if (!client) {
-        co_return rpc::make_error_code(rpc::errc::disconnected_endpoint);
-    }
-    auto reply = co_await client->enable_coprocessors(
+script_dispatcher::enable_coprocessors(
+  supervisor_client_protocol client, enable_copros_request req) {
+    auto reply = co_await client.enable_coprocessors(
       std::move(req), rpc::client_opts(model::no_timeout));
     if (!reply) {
         co_return reply.error();
@@ -227,7 +223,7 @@ script_dispatcher::enable_coprocessors(enable_copros_request req) {
     if (!deregisters.empty()) {
         vlog(coproclog.error, "Immediately deregistering ids {}", deregisters);
         auto req = disable_copros_request({.ids = std::move(deregisters)});
-        auto reply = co_await client->disable_coprocessors(
+        auto reply = co_await client.disable_coprocessors(
           std::move(req), rpc::client_opts(model::no_timeout));
         if (!reply) {
             vlog(
@@ -246,12 +242,9 @@ script_dispatcher::remove_sources(script_id id) {
 }
 
 ss::future<result<std::vector<script_id>>>
-script_dispatcher::disable_coprocessors(disable_copros_request req) {
-    auto client = co_await get_client();
-    if (!client) {
-        co_return rpc::make_error_code(rpc::errc::disconnected_endpoint);
-    }
-    auto reply = co_await client->disable_coprocessors(
+script_dispatcher::disable_coprocessors(
+  supervisor_client_protocol client, disable_copros_request req) {
+    auto reply = co_await client.disable_coprocessors(
       std::move(req), rpc::client_opts(model::no_timeout));
     if (!reply) {
         co_return reply.error();
@@ -279,17 +272,14 @@ ss::future<> script_dispatcher::remove_all_sources() {
     return _pacemaker.invoke_on_all([](pacemaker& p) { return p.reset(); });
 }
 
-ss::future<std::error_code> script_dispatcher::disable_all_coprocessors() {
+ss::future<std::error_code>
+script_dispatcher::disable_all_coprocessors(supervisor_client_protocol client) {
     struct error_cnt {
         size_t n_success{0};
         size_t n_internal_error{0};
         size_t n_script_dnes{0};
     };
-    auto client = co_await get_client();
-    if (!client) {
-        co_return rpc::make_error_code(rpc::errc::disconnected_endpoint);
-    }
-    auto reply = co_await client->disable_all_coprocessors(
+    auto reply = co_await client.disable_all_coprocessors(
       empty_request(), rpc::client_opts(model::no_timeout));
     if (!reply) {
         co_return reply.error();
@@ -318,51 +308,6 @@ ss::future<std::error_code> script_dispatcher::disable_all_coprocessors() {
       cnt.n_script_dnes);
     co_await remove_all_sources();
     co_return rpc::make_error_code(rpc::errc::success);
-}
-
-ss::future<result<rpc::client_context<state_size_t>>>
-script_dispatcher::heartbeat(int8_t connect_attempts) {
-    if (connect_attempts <= 0) {
-        co_return result<rpc::client_context<state_size_t>>(
-          rpc::errc::disconnected_endpoint);
-    }
-    auto timeout = model::timeout_clock::now() + 1s;
-    auto transport = co_await _transport.get_connected(timeout);
-    if (!transport) {
-        vlog(
-          coproclog.error,
-          "Failed to connect wasm engine, reason {}",
-          transport.error());
-        if (
-          transport.error() == rpc::errc::disconnected_endpoint
-          || transport.error() == rpc::errc::exponential_backoff) {
-            /// The expected 1s timeout didn't occur
-            co_await ss::sleep(1s);
-        }
-        co_return co_await heartbeat(connect_attempts - 1);
-    }
-    supervisor_client_protocol client(*transport.value());
-    co_return co_await client.heartbeat(
-      empty_request(), rpc::client_opts(timeout));
-}
-
-ss::future<std::optional<coproc::supervisor_client_protocol>>
-script_dispatcher::get_client() {
-    model::timeout_clock::duration dur = 1s;
-    while (true) {
-        auto timeout = model::timeout_clock::now() + 100ms;
-        auto transport = co_await _transport.get_connected(timeout);
-        if (!transport) {
-            vlog(
-              coproclog.error,
-              "script_dispatcher failed to aquire a connection to the wasm "
-              "engine (to deploy or remove a script), retrying... ");
-            co_await ss::sleep(dur);
-            dur = std::min(model::timeout_clock::duration(10s), dur * 2);
-        } else {
-            co_return supervisor_client_protocol(*transport.value());
-        }
-    }
 }
 
 } // namespace coproc::wasm

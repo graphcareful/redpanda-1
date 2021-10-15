@@ -59,8 +59,9 @@ ss::future<> event_listener::stop() {
       });
 }
 
-event_listener::event_listener()
-  : _client(make_client()) {}
+event_listener::event_listener(rpc::reconnect_transport& t) noexcept
+  : _client(make_client())
+  , _transport(t) {}
 
 ss::future<> event_listener::start() {
     co_await ss::parallel_for_each(
@@ -123,8 +124,19 @@ ss::future<> event_listener::do_start() {
         }
     }
 
+    auto timeout = model::timeout_clock::now() + 100ms;
+    auto transport = co_await _transport.get_connected(timeout);
+    if (!transport) {
+        vlog(
+          coproclog.error,
+          "script_dispatcher failed to aquire a connection to the wasm "
+          "engine (to deploy or remove a script), retrying... ");
+        co_return;
+    }
+    supervisor_client_protocol client(*transport.value());
+
     for (auto& [_, handler] : _handlers) {
-        auto cron_res = co_await handler->preparation_before_process();
+        auto cron_res = co_await handler->preparation_before_process(client);
         switch (cron_res) {
         case event_handler::cron_finish_status::skip_pull: {
             co_return;
@@ -138,14 +150,10 @@ ss::future<> event_listener::do_start() {
         }
     }
 
-    co_await do_ingest();
-}
-
-ss::future<> event_listener::do_ingest() {
-    /// This method performs the main polling behavior, looping until theres no
-    /// more data to read from the topic. Normally we would be concerned about
-    /// keeping all of this data in memory, however the topic is compacted, we
-    /// don't expect the size of unique records to be very big.
+    /// The main polling behavior, looping until theres no more data to read
+    /// from the topic. Normally we would be concerned about keeping all of this
+    /// data in memory, however the topic is compacted, we don't expect the size
+    /// of unique records to be very big.
     model::record_batch_reader::data_t events;
     model::offset last_offset = _offset;
     ss::stop_iteration stop{};
@@ -154,7 +162,7 @@ ss::future<> event_listener::do_ingest() {
     }
     auto decompressed = co_await decompress_wasm_events(std::move(events));
     auto reconciled = wasm::reconcile_events_by_type(std::move(decompressed));
-    co_await process_events(std::move(reconciled), last_offset);
+    co_await process_events(client, std::move(reconciled), last_offset);
 }
 
 ss::future<ss::stop_iteration>
@@ -192,8 +200,10 @@ event_listener::poll_topic(model::record_batch_reader::data_t& events) {
                                  : ss::stop_iteration::no;
 };
 
-ss::future<>
-event_listener::process_events(event_batch events, model::offset last_offset) {
+ss::future<> event_listener::process_events(
+  supervisor_client_protocol client,
+  event_batch events,
+  model::offset last_offset) {
     for (auto& [type, prepared_events] : events) {
         auto it = _handlers.find(type);
         if (it == _handlers.end()) {
@@ -205,7 +215,7 @@ event_listener::process_events(event_batch events, model::offset last_offset) {
         }
 
         try {
-            co_await it->second->process(std::move(prepared_events));
+            co_await it->second->process(client, std::move(prepared_events));
         } catch (const async_event_handler_exception& ex) {
             _offset = last_offset;
             vlog(coproclog.error, "{}", ex.what());

@@ -49,11 +49,12 @@ public:
 
     /// Cron. Run it from loop in do_start event_listener function
     virtual ss::future<event_handler::cron_finish_status>
-    preparation_before_process() = 0;
+      preparation_before_process(supervisor_client_protocol) = 0;
 
     /// Process parsed event with the same coproc type
-    virtual ss::future<>
-    process(absl::btree_map<script_id, parsed_event> wsas) = 0;
+    virtual ss::future<> process(
+      supervisor_client_protocol, absl::btree_map<script_id, parsed_event> wsas)
+      = 0;
 };
 
 class async_event_handler_exception final : public event_handler_exception {
@@ -70,10 +71,11 @@ public:
     ss::future<> stop() override;
 
     ss::future<event_handler::cron_finish_status>
-    preparation_before_process() override;
+      preparation_before_process(supervisor_client_protocol) override;
 
-    ss::future<>
-    process(absl::btree_map<script_id, parsed_event> wsas) override;
+    ss::future<> process(
+      supervisor_client_protocol,
+      absl::btree_map<script_id, parsed_event> wsas) override;
 
 private:
     /// Set of known script ids to be active
@@ -89,12 +91,13 @@ public:
     ss::future<> stop() override;
 
     ss::future<event_handler::cron_finish_status>
-    preparation_before_process() override {
+    preparation_before_process(supervisor_client_protocol) override {
         co_return cron_finish_status::none;
     }
 
-    ss::future<>
-    process(absl::btree_map<script_id, parsed_event> wsas) override;
+    ss::future<> process(
+      supervisor_client_protocol,
+      absl::btree_map<script_id, parsed_event> wsas) override;
 
     std::optional<iobuf> get_code(std::string_view name);
 

@@ -22,6 +22,8 @@
 
 SEASTAR_THREAD_TEST_CASE(data_policy_handler_test) {
     coproc::wasm::data_policy_event_handler handler;
+    rpc::transport t(rpc::transport_configuration{});
+    coproc::supervisor_client_protocol c(t);
     handler.start().get();
 
     ss::sstring name1 = "foo";
@@ -35,7 +37,7 @@ SEASTAR_THREAD_TEST_CASE(data_policy_handler_test) {
     absl::btree_map<coproc::script_id, coproc::wasm::parsed_event> events1;
     events1.emplace(script_id1, std::move(event1));
 
-    handler.process(std::move(events1)).get();
+    handler.process(c, std::move(events1)).get();
 
     auto code = handler.get_code(name1);
     auto raw_value
@@ -49,7 +51,7 @@ SEASTAR_THREAD_TEST_CASE(data_policy_handler_test) {
     absl::btree_map<coproc::script_id, coproc::wasm::parsed_event> events2;
     events2.emplace(script_id1, std::move(event2));
 
-    handler.process(std::move(events2)).get();
+    handler.process(c, std::move(events2)).get();
 
     code = handler.get_code(name1);
 

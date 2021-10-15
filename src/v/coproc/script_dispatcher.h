@@ -34,7 +34,7 @@ public:
     /// Upon retrival of each successful ack, the script will be registered with
     /// the pacemaker.
     ss::future<result<std::vector<script_id>>>
-      enable_coprocessors(enable_copros_request);
+      enable_coprocessors(supervisor_client_protocol, enable_copros_request);
 
     /// Called when removal commands arrive on the coproc_internal_topic
     ///
@@ -42,15 +42,12 @@ public:
     /// its internal map. Upon retrival of each successful ack, the script will
     /// be deregistered from the pacemaker.
     ss::future<result<std::vector<script_id>>>
-      disable_coprocessors(disable_copros_request);
+      disable_coprocessors(supervisor_client_protocol, disable_copros_request);
 
     /// Invoke this after fatal error has occurred and its desired to clear all
     /// state from the wasm engine.
-    ss::future<std::error_code> disable_all_coprocessors();
-
-    /// Invoke this to query weather the wasm engine is up or not
-    ss::future<result<rpc::client_context<state_size_t>>>
-    heartbeat(int8_t connect_attempts = 3);
+    ss::future<std::error_code>
+      disable_all_coprocessors(supervisor_client_protocol);
 
 private:
     /// The following methods are introduced to sidestep an issue detected when
@@ -61,21 +58,11 @@ private:
     ss::future<> remove_all_sources();
     ss::future<bool> script_exists(script_id);
 
-    /// Return std::nullopt only when the abort source is triggered,
-    /// otherwise will forever loop attempting to re-connect to the wasm
-    /// engine.
-    ss::future<std::optional<supervisor_client_protocol>> get_client();
-
 private:
     /// Interface to the coproc subsystem. This class calls add_source &
     /// remove_source to add and remove coprocessors. It must do them however
     /// across all shards
     ss::sharded<pacemaker>& _pacemaker;
-
-    /// Underlying transport handle to the wasm engine. Although there are one
-    /// of these per shard, this class is not sharded and only borrows a
-    /// reference to this from shard 0
-    rpc::reconnect_transport& _transport;
 };
 
 } // namespace coproc::wasm

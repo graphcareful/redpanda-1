@@ -24,8 +24,11 @@ ss::future<> async_event_handler::start() { co_return; }
 ss::future<> async_event_handler::stop() { co_return; }
 
 ss::future<event_handler::cron_finish_status>
-async_event_handler::preparation_before_process() {
-    auto heartbeat = co_await _dispatcher.heartbeat();
+async_event_handler::preparation_before_process(
+  supervisor_client_protocol client) {
+    auto timeout = model::timeout_clock::now() + 1s;
+    auto heartbeat = co_await client.heartbeat(
+      empty_request(), rpc::client_opts(timeout));
     if (heartbeat.has_error()) {
         std::error_code err = heartbeat.error();
         if (
@@ -43,7 +46,7 @@ async_event_handler::preparation_before_process() {
         /// according to redpanda and according to the wasm engine.
         /// Reconcile all state from offset 0.
         vlog(coproclog.info, "Replaying coprocessor state...");
-        if (co_await _dispatcher.disable_all_coprocessors()) {
+        if (co_await _dispatcher.disable_all_coprocessors(client)) {
             vlog(
               coproclog.error,
               "Failed to reset wasm_engine state, will keep retrying...");
@@ -55,8 +58,9 @@ async_event_handler::preparation_before_process() {
     co_return cron_finish_status::none;
 }
 
-ss::future<>
-async_event_handler::process(absl::btree_map<script_id, parsed_event> wsas) {
+ss::future<> async_event_handler::process(
+  supervisor_client_protocol client,
+  absl::btree_map<script_id, parsed_event> wsas) {
     std::vector<enable_copros_request::data> enables;
     std::vector<script_id> disables;
     for (auto& [id, event] : wsas) {
@@ -83,7 +87,8 @@ async_event_handler::process(absl::btree_map<script_id, parsed_event> wsas) {
     /// endpoint, instead of two seperate RPC endpoints
     if (!enables.empty()) {
         enable_copros_request req{.inputs = std::move(enables)};
-        auto resp = co_await _dispatcher.enable_coprocessors(std::move(req));
+        auto resp = co_await _dispatcher.enable_coprocessors(
+          client, std::move(req));
         if (resp.has_error()) {
             throw async_event_handler_exception(fmt_with_ctx(
               fmt::format,
@@ -102,7 +107,8 @@ async_event_handler::process(absl::btree_map<script_id, parsed_event> wsas) {
     }
     if (!disables.empty()) {
         disable_copros_request req{.ids = std::move(disables)};
-        auto resp = co_await _dispatcher.disable_coprocessors(std::move(req));
+        auto resp = co_await _dispatcher.disable_coprocessors(
+          client, std::move(req));
         if (resp.has_error()) {
             /// In this case the code will follow a path that re-enters this
             /// method with the same inputs, and the call to enable_copros
@@ -128,7 +134,7 @@ ss::future<> data_policy_event_handler::stop() { return _scripts.stop(); }
 
 // event_listener run this method from 0-core
 ss::future<> data_policy_event_handler::process(
-  absl::btree_map<script_id, parsed_event> wsas) {
+  supervisor_client_protocol, absl::btree_map<script_id, parsed_event> wsas) {
     for (auto& [id, event] : wsas) {
         co_await _scripts.invoke_on_all(
           [id = id, &event = event](

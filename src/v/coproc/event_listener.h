@@ -35,7 +35,7 @@ namespace coproc::wasm {
 class event_listener {
 public:
     /// class constructor
-    event_listener();
+    explicit event_listener(rpc::reconnect_transport&) noexcept;
 
     /// To be invoked once on redpanda::application startup
     ///
@@ -53,16 +53,22 @@ public:
 
 private:
     ss::future<> do_start();
-    ss::future<> do_ingest();
 
     ss::future<ss::stop_iteration>
     poll_topic(model::record_batch_reader::data_t&);
 
-    ss::future<> process_events(event_batch events, model::offset last_offset);
+    ss::future<> process_events(
+      supervisor_client_protocol,
+      event_batch events,
+      model::offset last_offset);
 
 private:
     /// Kafka client used to poll the internal topic
     kafka::client::client _client;
+
+    /// Theres one transport per shard, this is just the handle to a transport
+    /// on 'this' shard.
+    rpc::reconnect_transport& _transport;
 
     /// Primitives used to manage the poll loop
     ss::gate _gate;
