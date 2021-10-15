@@ -26,7 +26,7 @@ namespace coproc::wasm {
 /// retrival of the reply, invokes the appropriate action within the pacemaker.
 class script_dispatcher {
 public:
-    explicit script_dispatcher(ss::sharded<pacemaker>&, ss::abort_source&);
+    explicit script_dispatcher(ss::sharded<pacemaker>&) noexcept;
 
     /// Called when new coprocessors arrive on the coproc_internal_topic
     ///
@@ -71,11 +71,6 @@ private:
     /// remove_source to add and remove coprocessors. It must do them however
     /// across all shards
     ss::sharded<pacemaker>& _pacemaker;
-
-    /// Reference to the script_listeners abort source. This class uses this
-    /// abort source to know when to abort the transports retry loop in order to
-    /// properly shutdown
-    ss::abort_source& _abort_source;
 
     /// Underlying transport handle to the wasm engine. Although there are one
     /// of these per shard, this class is not sharded and only borrows a

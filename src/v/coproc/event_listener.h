@@ -51,8 +51,6 @@ public:
     /// Register event_handel for coproc type
     void register_handler(event_type, event_handler*);
 
-    ss::abort_source& get_abort_source();
-
 private:
     ss::future<> do_start();
     ss::future<> do_ingest();

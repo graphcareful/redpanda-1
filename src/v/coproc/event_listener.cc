@@ -98,8 +98,6 @@ void event_listener::register_handler(event_type type, event_handler* handler) {
       coproc_type_as_string_view(type));
 }
 
-ss::abort_source& event_listener::get_abort_source() { return _abort_source; }
-
 static ss::future<std::vector<model::record_batch>>
 decompress_wasm_events(model::record_batch_reader::data_t events) {
     return ssx::parallel_transform(

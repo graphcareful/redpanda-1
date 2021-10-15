@@ -64,8 +64,7 @@ public:
 
 class async_event_handler final : public event_handler {
 public:
-    explicit async_event_handler(
-      ss::abort_source& abort_source, ss::sharded<pacemaker>& pacemaker);
+    explicit async_event_handler(ss::sharded<pacemaker>& pacemaker) noexcept;
 
     ss::future<> start() override;
     ss::future<> stop() override;
@@ -79,9 +78,6 @@ public:
 private:
     /// Set of known script ids to be active
     absl::btree_set<script_id> _active_ids;
-
-    /// Pass it tot script_dispatcher
-    ss::abort_source& _abort_source;
 
     /// Used to make requests to the wasm engine
     script_dispatcher _dispatcher;

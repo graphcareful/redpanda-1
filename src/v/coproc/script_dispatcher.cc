@@ -148,10 +148,8 @@ ss::future<bool> script_dispatcher::script_exists(script_id id) {
       std::logical_or<>());
 }
 
-script_dispatcher::script_dispatcher(
-  ss::sharded<pacemaker>& p, ss::abort_source& as)
+script_dispatcher::script_dispatcher(ss::sharded<pacemaker>& p) noexcept
   : _pacemaker(p)
-  , _abort_source(as)
   , _transport(_pacemaker.local().resources().transport) {}
 
 ss::future<std::vector<std::vector<coproc::errc>>>
@@ -352,9 +350,6 @@ ss::future<std::optional<coproc::supervisor_client_protocol>>
 script_dispatcher::get_client() {
     model::timeout_clock::duration dur = 1s;
     while (true) {
-        if (_abort_source.abort_requested()) {
-            co_return std::nullopt;
-        }
         auto timeout = model::timeout_clock::now() + 100ms;
         auto transport = co_await _transport.get_connected(timeout);
         if (!transport) {

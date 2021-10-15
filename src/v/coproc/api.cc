@@ -42,7 +42,7 @@ ss::future<> api::start() {
     _listener = std::make_unique<wasm::event_listener>();
 
     _wasm_async_handler = std::make_unique<coproc::wasm::async_event_handler>(
-      _listener->get_abort_source(), std::ref(_pacemaker));
+      std::ref(_pacemaker));
     _listener->register_handler(
       coproc::wasm::event_type::async, _wasm_async_handler.get());
 

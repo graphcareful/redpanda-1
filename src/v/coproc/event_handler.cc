@@ -16,9 +16,8 @@
 namespace coproc::wasm {
 
 async_event_handler::async_event_handler(
-  ss::abort_source& abort_source, ss::sharded<pacemaker>& pacemaker)
-  : _abort_source(abort_source)
-  , _dispatcher(pacemaker, _abort_source) {}
+  ss::sharded<pacemaker>& pacemaker) noexcept
+  : _dispatcher(pacemaker) {}
 
 ss::future<> async_event_handler::start() { co_return; }
 
