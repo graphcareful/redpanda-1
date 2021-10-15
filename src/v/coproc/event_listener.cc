@@ -159,6 +159,9 @@ ss::future<> event_listener::do_start() {
     ss::stop_iteration stop{};
     while (stop == ss::stop_iteration::no) {
         stop = co_await poll_topic(events);
+        if (_abort_source.abort_requested()) {
+            co_return;
+        }
     }
     auto decompressed = co_await decompress_wasm_events(std::move(events));
     auto reconciled = wasm::reconcile_events_by_type(std::move(decompressed));
@@ -169,9 +172,7 @@ ss::future<ss::stop_iteration>
 event_listener::poll_topic(model::record_batch_reader::data_t& events) {
     auto response = co_await _client.fetch_partition(
       model::coprocessor_internal_tp, _offset, 64_KiB, 100ms);
-    if (
-      response.data.error_code != kafka::error_code::none
-      || _abort_source.abort_requested()) {
+    if (response.data.error_code != kafka::error_code::none) {
         co_return ss::stop_iteration::yes;
     }
     vassert(response.data.topics.size() == 1, "Unexpected partition size");
