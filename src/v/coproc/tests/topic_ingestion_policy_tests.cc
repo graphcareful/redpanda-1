@@ -65,32 +65,3 @@ FIXTURE_TEST(test_copro_tip_earliest, tip_fixture) {
     auto results = run(tp_earliest, 400, 800);
     BOOST_CHECK_EQUAL(800, results);
 }
-
-FIXTURE_TEST(test_copro_tip_stored, coproc_test_fixture) {
-    model::topic sttp("sttp");
-    model::ntp sttp_ntp(model::kafka_namespace, sttp, model::partition_id(0));
-    model::ntp output_ntp(
-      model::kafka_namespace,
-      to_materialized_topic(sttp, identity_coprocessor::identity_topic),
-      model::partition_id(0));
-    setup({{sttp, 1}}).get();
-
-    enable_coprocessors(
-      {{.id = 7843,
-        .data{
-          .tid = coproc::registry::type_identifier::identity_coprocessor,
-          .topics = {{sttp, tp_stored}}}}})
-      .get();
-
-    produce(sttp_ntp, make_random_batch(200)).get();
-    auto a_results = consume(output_ntp, 200).get();
-    BOOST_CHECK_EQUAL(record_sum(a_results), 200);
-
-    ss::sleep(1s).get();
-    info("Restarting....");
-    restart().get();
-
-    produce(sttp_ntp, make_random_batch(200)).get();
-    auto results = consume(output_ntp, 400).get();
-    BOOST_CHECK_GE(record_sum(results), 400);
-}
