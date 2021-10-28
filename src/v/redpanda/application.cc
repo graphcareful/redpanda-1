@@ -597,6 +597,10 @@ void application::wire_up_redpanda_services() {
       .get();
     vlog(_log.info, "Partition manager started");
 
+    syschecks::systemd_message("Adding non_replicable partition manager").get();
+    construct_service(nr_partition_manager, std::ref(storage)).get();
+    vlog(_log.info, "Non replicable partition manager started");
+
     // controller
 
     construct_service(data_policies).get();
@@ -607,6 +611,7 @@ void application::wire_up_redpanda_services() {
       controller,
       _raft_connection_cache,
       partition_manager,
+      nr_partition_manager,
       shard_table,
       storage,
       std::ref(raft_group_manager),
@@ -948,6 +953,12 @@ void application::start_redpanda() {
 
     syschecks::systemd_message("Starting the partition manager").get();
     partition_manager.invoke_on_all(&cluster::partition_manager::start).get();
+
+    syschecks::systemd_message("Starting the materialized partition manager")
+      .get();
+    nr_partition_manager
+      .invoke_on_all(&cluster::non_replicable_partition_manager::start)
+      .get();
 
     syschecks::systemd_message("Starting Raft group manager").get();
     raft_group_manager.invoke_on_all(&raft::group_manager::start).get();
