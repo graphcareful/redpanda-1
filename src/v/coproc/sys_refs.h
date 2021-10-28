@@ -22,11 +22,12 @@ namespace coproc {
 /// Struct of references of external layers of redpanda that coproc will
 /// leverage
 struct sys_refs {
-    ss::sharded<storage::api>& storage;
     ss::sharded<cluster::non_replicable_topics_frontend>& mt_frontend;
     ss::sharded<cluster::topics_frontend>& topics_frontend;
     ss::sharded<cluster::metadata_cache>& metadata_cache;
     ss::sharded<cluster::partition_manager>& partition_manager;
+    ss::sharded<cluster::non_replicable_partition_manager>&
+      nr_partition_manager;
 };
 
 } // namespace coproc

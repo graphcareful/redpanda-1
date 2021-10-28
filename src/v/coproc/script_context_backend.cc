@@ -12,6 +12,8 @@
 #include "script_context_backend.h"
 
 #include "cluster/metadata_cache.h"
+#include "cluster/non_replicable_partition.h"
+#include "cluster/non_replicable_partition_manager.h"
 #include "cluster/non_replicable_topics_frontend.h"
 #include "coproc/exception.h"
 #include "coproc/logger.h"
@@ -45,7 +47,8 @@ private:
 };
 
 static ss::future<> do_write_materialized_partition(
-  storage::log log, model::record_batch_reader reader) {
+  ss::lw_shared_ptr<cluster::non_replicable_partition> partition,
+  model::record_batch_reader reader) {
     /// Re-write all batch term_ids to 1, otherwise they will carry the
     /// term ids of records coming from parent batches
     auto [success, batch_w_correct_terms]
@@ -56,7 +59,7 @@ static ss::future<> do_write_materialized_partition(
     vassert(
       success,
       "Wasm engine impl error, failed crc checks, check wasm engine impl: {}",
-      log.config().ntp());
+      partition->ntp());
 
     /// Compress the data before writing...
     auto compressed = co_await std::move(batch_w_correct_terms)
@@ -70,20 +73,20 @@ static ss::future<> do_write_materialized_partition(
       .timeout = model::no_timeout};
     /// Finally, write the batch
     co_await std::move(compressed)
-      .for_each_ref(log.make_appender(write_cfg), model::no_timeout)
+      .for_each_ref(log->make_appender(write_cfg), model::no_timeout)
       .discard_result();
 }
 
-static ss::future<storage::log>
-get_log(storage::log_manager& log_mgr, model::ntp ntp) {
+static ss::future<ss::lw_shared_ptr<non_replicable_partition>> get_partition(
+  cluster::non_replicable_partition_manager& nr_pm, model::ntp ntp) {
     /// It is likely that when a topic is created, it exists in topic metadata
-    /// for a moment before its storage::log is instantiated. This is due to the
-    /// controller_backend performing this work out of band. This loop attempts
-    /// to minimize the number of retries that would be performed due to this
-    /// case.
+    /// for a moment before its materialized_partition is instantiated.
+    /// This is due to the controller_backend performing this work out of band.
+    /// This loop attempts to minimize the number of retries that would be
+    /// performed due to this case.
     int8_t attempts = 5;
     while (attempts-- > 0) {
-        auto found = log_mgr.get(ntp);
+        auto found = nr_pm.get(ntp);
         if (found) {
             /// Log exists, do nothing and return it
             co_return *found;
@@ -99,10 +102,10 @@ get_log(storage::log_manager& log_mgr, model::ntp ntp) {
 }
 
 struct ss::future<> write_materialized_partition(
-  storage::log log,
+  ss::lw_shared_ptr<cluster::non_replicable_partition> log,
   std::vector<model::record_batch_reader> readers,
   absl::node_hash_map<model::ntp, mutex>& locks) {
-    const auto& ntp = log.config().ntp();
+    const auto& ntp = log.ntp();
     auto found = locks.find(ntp);
     if (found == locks.end()) {
         found = locks.emplace(ntp, mutex()).first;
@@ -238,12 +241,17 @@ static ss::future<std::vector<cluster::topic_result>> make_materialized_topics(
 }
 
 static ss::future<std::tuple<
-  std::vector<std::tuple<storage::log, batch_of_batches>>,
+  std::vector<std::tuple<
+    ss::lw_shared_ptr<cluster::non_replicable_partition>,
+    batch_of_batches>>,
   absl::flat_hash_set<ss::lw_shared_ptr<ntp_context>>>>
 logs_for_context(
-  storage::log_manager& log_mgr,
+  cluster::non_replicable_partition_manager& nr_pm,
   absl::flat_hash_map<model::ntp, request_context::state> wgrp) {
-    std::vector<std::tuple<storage::log, batch_of_batches>> labs;
+    std::vector<std::tuple<
+      ss::lw_shared_ptr<cluster::non_replicable_partition>,
+      batch_of_batches>>
+      labs;
     absl::flat_hash_set<ss::lw_shared_ptr<ntp_context>> ipts;
     absl::flat_hash_set<ss::lw_shared_ptr<ntp_context>> failures;
     for (auto& [ntp, op] : wgrp) {
@@ -254,7 +262,7 @@ logs_for_context(
                 /// outputs that share the same input
                 continue;
             }
-            auto log = co_await get_log(log_mgr, ntp);
+            auto log = co_await get_partition(nr_pm, ntp);
             labs.emplace_back(log, std::move(op.bobs));
             ipts.emplace(op.ctx);
         } catch (const log_not_yet_created_exception& ex) {
@@ -284,6 +292,22 @@ static void prune_failures(
     }
 }
 
+static ss::future<absl::flat_hash_set<ss::lw_shared_ptr<ntp_context>>>
+write_materialized_partitions(output_write_args args) {
+    for (auto [partition, bobs] :)
+        try {
+            auto& [partition, bobs] = t;
+            co_await write_materialized_partition(
+              partition, std::move(bobs), args.locks);
+        } catch (ss::gate_closed_exception) {
+            vlog(
+              coproclog.warn,
+              "Materialized partition closed while writing: {}",
+              partition->ntp());
+        }
+};
+}
+
 ss::future<>
 write_materialized(output_write_inputs replies, output_write_args args) {
     if (replies.empty()) {
@@ -303,14 +327,11 @@ write_materialized(output_write_inputs replies, output_write_args args) {
           args.rs.mt_frontend, std::move(rctx.topics));
         /// 2. Remove replies w/ error from manifest
         prune_failures(rctx, std::move(results));
-        /// 3. Obtain all storage::logs for all requests
+        /// 3. Obtain all non_replicable_partitions for all requests
         auto [labs, ipts] = co_await logs_for_context(
-          args.rs.storage.local().log_mgr(), std::move(rctx.rgrp));
-        /// 4. Perform writes (only failures are fatal, i.e. crc exception)
-        co_await ss::parallel_for_each(labs, [args](auto& t) -> ss::future<> {
-            co_await write_materialized_partition(
-              std::get<0>(t), std::move(std::get<1>(t)), args.locks);
-        });
+          args.rs.nr_partition_manager.local(), std::move(rctx.rgrp));
+        /// 4. Perform writes
+        co_await write_materialized_partitions(std::move(labs));
         /// 5. Commit offsets
         push_offsets_ahead(std::move(ipts), args.id);
     } catch (const cluster::non_replicable_topic_creation_exception& ex) {

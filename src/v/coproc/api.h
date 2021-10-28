@@ -24,12 +24,12 @@ class api {
 public:
     api(
       unresolved_address,
-      ss::sharded<storage::api>&,
       ss::sharded<cluster::topic_table>&,
       ss::sharded<cluster::shard_table>&,
       ss::sharded<cluster::topics_frontend>&,
       ss::sharded<cluster::metadata_cache>&,
-      ss::sharded<cluster::partition_manager>&) noexcept;
+      ss::sharded<cluster::partition_manager>&,
+      ss::sharded<cluster::non_replicable_partition_manager>&) noexcept;
 
     ~api();
 

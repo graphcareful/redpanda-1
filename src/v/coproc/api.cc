@@ -24,19 +24,20 @@ namespace coproc {
 
 api::api(
   unresolved_address addr,
-  ss::sharded<storage::api>& storage,
   ss::sharded<cluster::topic_table>& topic_table,
   ss::sharded<cluster::shard_table>& shard_table,
   ss::sharded<cluster::topics_frontend>& topics_frontend,
   ss::sharded<cluster::metadata_cache>& metadata_cache,
-  ss::sharded<cluster::partition_manager>& partition_manager) noexcept
+  ss::sharded<cluster::partition_manager>& partition_manager,
+  ss::sharded<cluster::non_replicable_partition_manager>&
+    nr_partition_manager) noexcept
   : _engine_addr(std::move(addr))
   , _rs(sys_refs{
-      .storage = storage,
       .mt_frontend = _mt_frontend,
       .topics_frontend = topics_frontend,
       .metadata_cache = metadata_cache,
-      .partition_manager = partition_manager})
+      .partition_manager = partition_manager,
+      .nr_partition_manager = nr_partition_manager})
   , _topics(topic_table)
   , _shard_table(shard_table) {}
 
