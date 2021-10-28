@@ -14,6 +14,7 @@
 #include "cluster/fwd.h"
 #include "cluster/logger.h"
 #include "cluster/members_table.h"
+#include "cluster/non_replicable_partition_manager.h"
 #include "cluster/partition.h"
 #include "cluster/partition_leaders_table.h"
 #include "cluster/partition_manager.h"
@@ -952,24 +953,35 @@ ss::future<> controller_backend::delete_non_replicable_partition(
     vlog(clusterlog.trace, "removing {} from shard table at {}", ntp, rev);
     co_await _shard_table.invoke_on_all(
       [ntp, rev](shard_table& st) { st.erase(ntp, rev); });
-    auto log = _storage.local().log_mgr().get(ntp);
-    if (log && log->config().get_revision() < rev) {
-        co_await _storage.local().log_mgr().remove(ntp);
+    auto nr_partition = _nr_partition_manager.local().get(ntp);
+    if (nr_partition && nr_partition->get_revision_id() < rev) {
+        co_await _nr_partition_manager.local().remove(ntp);
     }
 }
 
 ss::future<std::error_code> controller_backend::create_non_replicable_partition(
   model::ntp ntp, model::revision_id rev) {
-    auto cfg = _topics.local().get_topic_cfg(model::topic_namespace_view(ntp));
-    if (!cfg) {
+    auto tt_md = _topics.local().get_topic_table_metadata(
+      model::topic_namespace_view(ntp));
+    if (!tt_md) {
         // partition was already removed, do nothing
         co_return errc::success;
     }
-    vassert(
-      !_storage.local().log_mgr().get(ntp),
-      "Log exists for missing entry in topics_table");
-    auto ntp_cfg = cfg->make_ntp_config(_data_directory, ntp.tp.partition, rev);
-    co_await _storage.local().log_mgr().manage(std::move(ntp_cfg));
+    // This will assert if API is incorrect
+    auto nr_partition = _nr_partition_manager.local().get(ntp);
+    if (likely(!nr_partition)) {
+        auto src_partition = _partition_manager.local().get(
+          model::ntp(ntp.ns, tt_md->get_source_topic(), ntp.tp.partition));
+        if (!src_partition) {
+            co_return errc::partition_not_exists;
+        }
+        auto ntp_cfg = tt_md->get_configuration().cfg.make_ntp_config(
+          _data_directory, ntp.tp.partition, rev);
+        co_await _nr_partition_manager.local().manage(
+          std::move(ntp_cfg), src_partition);
+    } else if (nr_partition->get_revision_id() < rev) {
+        co_return errc::partition_already_exists;
+    }
     co_await add_to_shard_table(std::move(ntp), ss::this_shard_id(), rev);
     co_return errc::success;
 }
