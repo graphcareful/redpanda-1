@@ -62,9 +62,15 @@ const model::topic& topic_table::topic_metadata::get_source_topic() const {
 }
 const topic_configuration_assignment&
 topic_table::topic_metadata::get_configuration() const {
-    vassert(
-      is_topic_replicable(),
-      "Query for configuration on a non-replicable topic");
+    bool nr_grp = std::all_of(
+      configuration.assignments.begin(),
+      configuration.assignments.end(),
+      [](const partition_assignment& pa) { return pa.group() == -1; });
+    if (!is_topic_replicable()) {
+        vassert(nr_grp, "Misconfigured non_replicable topic");
+    } else {
+        vassert(!nr_grp, "Bad raft group id for replicable topic");
+    }
     return configuration;
 }
 
