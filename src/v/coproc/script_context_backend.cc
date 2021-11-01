@@ -22,10 +22,6 @@
 #include <seastar/core/coroutine.hh>
 
 namespace coproc {
-class crc_failed_exception final : public exception {
-    using exception::exception;
-};
-
 class follower_create_topic_exception final : public exception {
     using exception::exception;
 };
@@ -61,12 +57,12 @@ static ss::future<> do_write_materialized_partition(
         reference_window_consumer(
           model::record_batch_crc_checker(), set_term_id_to_zero()),
         model::no_timeout);
-    if (!success) {
-        /// In the case crc checks failed, do NOT write records to storage
-        throw crc_failed_exception(fmt::format(
-          "Batch failed crc checks, check wasm engine impl: {}",
-          log.config().ntp()));
-    }
+
+    vassert(
+      success,
+      "Batch failed crc checks, check wasm engine impl: {}",
+      log.config().ntp());
+
     /// Compress the data before writing...
     auto compressed = co_await std::move(batch_w_correct_terms)
                         .for_each_ref(
@@ -211,12 +207,6 @@ process_one_reply(process_batch_reply::data e, output_write_args args) {
     try {
         co_await write_materialized_partition(
           e.ntp, std::move(*e.reader), ntp_ctx, args);
-    } catch (const crc_failed_exception& ex) {
-        vlog(
-          coproclog.error,
-          "Reprocessing record, failure encountered, {}",
-          ex.what());
-        co_return;
     } catch (const cluster::non_replicable_topic_creation_exception& ex) {
         vlog(
           coproclog.error,
