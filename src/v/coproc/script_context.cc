@@ -32,14 +32,12 @@
 namespace coproc {
 
 script_context::script_context(
-  script_id id,
-  shared_script_resources& resources,
-  ntp_context_cache&& contexts)
+  script_id id, shared_script_resources& resources, routes_t&& routes) noexcept
   : _resources(resources)
-  , _ntp_ctxs(std::move(contexts))
+  , _routes(std::move(routes))
   , _id(id) {
     vassert(
-      !_ntp_ctxs.empty(),
+      !_routes.empty(),
       "Unallowed to create an instance of script_context without having a "
       "valid subscription list");
 }
@@ -128,7 +126,7 @@ ss::future<> script_context::shutdown() {
           "Idle callback futures abandoned due to shutdown, id: {}", _id)));
     }
     _abort_source.request_abort();
-    return _gate.close().then([this] { _ntp_ctxs.clear(); });
+    return _gate.close();
 }
 
 ss::future<> script_context::send_request(
@@ -142,7 +140,7 @@ ss::future<> script_context::send_request(
               output_write_args args{
                 .id = _id,
                 .rs = _resources.rs,
-                .inputs = _ntp_ctxs,
+                .inputs = _routes,
                 .locks = _resources.log_mtx};
               return write_materialized(
                 std::move(reply.value().data.resps), args);

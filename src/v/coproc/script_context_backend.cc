@@ -16,10 +16,14 @@
 #include "coproc/exception.h"
 #include "coproc/logger.h"
 #include "coproc/reference_window_consumer.hpp"
+#include "storage/api.h"
+#include "storage/log.h"
+#include "storage/log_manager.h"
 #include "storage/parser_utils.h"
 #include "vlog.h"
 
 #include <seastar/core/coroutine.hh>
+#include <seastar/core/sleep.hh>
 
 namespace coproc {
 class follower_create_topic_exception final : public exception {
@@ -27,6 +31,10 @@ class follower_create_topic_exception final : public exception {
 };
 
 class log_not_yet_created_exception final : public exception {
+    using exception::exception;
+};
+
+class bad_reply_exception final : public exception {
     using exception::exception;
 };
 
@@ -80,17 +88,16 @@ static ss::future<> do_write_materialized_partition(
 }
 
 static ss::future<storage::log>
-get_log(storage::log_manager& log_mgr, const model::ntp& ntp) {
+get_log(storage::log_manager& log_mgr, model::ntp ntp) {
     auto found = log_mgr.get(ntp);
     if (found) {
         /// Log exists, do nothing and return it
         co_return *found;
     }
     /// In the case the storage::log has not been created, but the topic has.
-    /// Retry again.
-    co_await ss::sleep(100ms);
     throw log_not_yet_created_exception(fmt::format(
-      "Materialized topic created but underlying log doesn't yet exist", ntp));
+      "Materialized topic {} created but underlying log doesn't yet exist",
+      ntp));
 }
 
 static ss::future<> maybe_make_materialized_log(
@@ -115,10 +122,6 @@ static ss::future<> maybe_make_materialized_log(
     /// Leader could be on a different machine, can only wait until log comes
     /// into existance
     if (!is_leader) {
-        /// TODO: We can do better, when we implement partition_movement we can
-        /// obtain events from topic_table, which could notify coproc that an
-        /// interested topic/partition has been created by the leader
-        co_await ss::sleep(1s);
         throw follower_create_topic_exception(fmt::format(
           "Follower of source topic {} attempted to created materialzied "
           "topic {} before leader partition had a chance to, sleeping "
@@ -145,44 +148,40 @@ static ss::future<> maybe_make_materialized_log(
 static ss::future<> write_materialized_partition(
   const model::ntp& ntp,
   model::record_batch_reader reader,
-  ss::lw_shared_ptr<ntp_context> ctx,
+  ss::lw_shared_ptr<cluster::partition> input,
   output_write_args args) {
     /// For the rational of why theres mutex uses here read relevent comments in
-    /// coproc/ntp_context.h
+    /// coproc/shared_script_resources.h
     auto found = args.locks.find(ntp);
     if (found == args.locks.end()) {
         found = args.locks.emplace(ntp, mutex()).first;
     }
     return found->second.with(
-      [args, ntp, ctx, reader = std::move(reader)]() mutable {
-          model::topic_namespace source(ctx->ntp().ns, ctx->ntp().tp.topic);
+      [args, ntp, input, reader = std::move(reader)]() mutable {
+          model::topic_namespace source(input->ntp().ns, input->ntp().tp.topic);
           model::topic_namespace new_materialized(ntp.ns, ntp.tp.topic);
           return maybe_make_materialized_log(
-                   source, new_materialized, ctx->partition->is_leader(), args)
+                   source, new_materialized, input->is_leader(), args)
             .then([args, ntp] {
                 return get_log(args.rs.storage.local().log_mgr(), ntp);
             })
-            .then([ntp, reader = std::move(reader)](storage::log log) mutable {
+            .then([reader = std::move(reader)](storage::log log) mutable {
                 return do_write_materialized_partition(log, std::move(reader));
             });
       });
 }
 
-/// TODO: If we group replies by destination topic, we can increase write
-/// throughput, be attentive to maintain relative ordering though..
 static ss::future<>
 process_one_reply(process_batch_reply::data e, output_write_args args) {
     /// Ensure this 'script_context' instance is handling the correct reply
     if (e.id != args.id()) {
         /// TODO: Maybe in the future errors of these type should mean redpanda
         /// kill -9's the wasm engine.
-        vlog(
-          coproclog.error,
+        throw bad_reply_exception(fmt::format(
           "erranous reply from wasm engine, mismatched id observed, expected: "
           "{} and observed {}",
           args.id,
-          e.id);
-        co_return;
+          e.id));
     }
     if (!e.reader) {
         throw script_failed_exception(
@@ -192,45 +191,21 @@ process_one_reply(process_batch_reply::data e, output_write_args args) {
             "error",
             e.id));
     }
-    /// Use the source topic portion of the materialized topic to perform a
-    /// lookup for the relevent 'ntp_context'
     auto found = args.inputs.find(e.source);
     if (found == args.inputs.end()) {
-        vlog(
-          coproclog.warn,
-          "script {} unknown source ntp: {}",
-          args.id,
-          e.source);
-        co_return;
+        throw bad_reply_exception(
+          fmt::format("script {} unknown source ntp: {}", args.id, e.source));
     }
-    auto ntp_ctx = found->second;
-    try {
+    auto src = found->second;
+    auto [cur, _] = src->wctx.offsets.try_emplace(
+      e.ntp, src->rctx.absolute_start);
+    /// Only write to partitions for which are up to date with the current
+    /// in progress read. Upon success bump offset to next batches start
+    if (cur->second == src->rctx.last_acked) {
         co_await write_materialized_partition(
-          e.ntp, std::move(*e.reader), ntp_ctx, args);
-    } catch (const cluster::non_replicable_topic_creation_exception& ex) {
-        vlog(
-          coproclog.error,
-          "Failed to create materialized topic: {}",
-          ex.what());
-        co_return;
-    } catch (const follower_create_topic_exception& ex) {
-        vlog(
-          coproclog.debug,
-          "Waiting to create materialized topic: {}",
-          ex.what());
-        co_return;
-    } catch (const log_not_yet_created_exception& ex) {
-        vlog(coproclog.trace, "Waiting for underlying log: {}", ex.what());
-        co_return;
+          e.ntp, std::move(*e.reader), src->rctx.input, args);
+        src->wctx.offsets[e.ntp] = src->rctx.last_read;
     }
-    auto ofound = ntp_ctx->offsets.find(args.id);
-    vassert(
-      ofound != ntp_ctx->offsets.end(),
-      "Offset not found for script id {} for ntp owning context: {}",
-      args.id,
-      ntp_ctx->ntp());
-    /// Reset the acked offset so that progress can be made
-    ofound->second.last_acked = ofound->second.last_read;
 }
 
 ss::future<>
@@ -238,10 +213,31 @@ write_materialized(output_write_inputs replies, output_write_args args) {
     if (replies.empty()) {
         vlog(
           coproclog.error, "Wasm engine interpreted the request as erraneous");
-    } else {
-        for (auto& e : replies) {
-            co_await process_one_reply(std::move(e), args);
-        }
+        co_return;
+    }
+    /// Dispatch all replies in parallel. No need to worry about multiple
+    /// replies from same apply call that write to the same destination topic as
+    /// wasm engine groups these replies into one
+    bool err{false};
+    co_await ss::parallel_for_each(
+      replies,
+      [args, &err](output_write_inputs::value_type& e) -> ss::future<> {
+          try {
+              co_await process_one_reply(std::move(e), args);
+          } catch (const bad_reply_exception& ex) {
+              vlog(coproclog.error, "Erraneous response detected: {}", ex);
+          } catch (const script_failed_exception& ex) {
+              throw ex;
+          } catch (const coproc::exception& ex) {
+              /// For any type of failure the offset will not be touched,
+              /// the read phase will always read from the global min of all
+              /// offsets ever registered.
+              vlog(coproclog.info, "Error while processing reply: {}", ex);
+              err = true;
+          }
+      });
+    if (err) {
+        co_await ss::sleep(100ms);
     }
 }
 
