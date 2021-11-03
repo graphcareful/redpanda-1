@@ -13,7 +13,7 @@
 
 #include "cluster/fwd.h"
 #include "coproc/fwd.h"
-#include "coproc/ntp_context.h"
+#include "coproc/script_context_router.h"
 #include "coproc/types.h"
 #include "utils/mutex.h"
 
@@ -31,7 +31,7 @@ struct output_write_args {
     ss::sharded<cluster::metadata_cache>& metadata;
     ss::sharded<cluster::non_replicable_topics_frontend>& frontend;
     ss::sharded<coproc::partition_manager>& pm;
-    ntp_context_cache& inputs;
+    routes_t& inputs;
     absl::node_hash_map<model::ntp, mutex>& locks;
 };
 
