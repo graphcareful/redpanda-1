@@ -21,6 +21,7 @@
 #include "storage/types.h"
 
 #include <seastar/core/abort_source.hh>
+#include <seastar/core/gate.hh>
 #include <seastar/core/shared_ptr.hh>
 
 #include <utility>
@@ -67,6 +68,7 @@ public:
           timequery(timequery_config) = 0;
 
         const ntp_config& config() const { return _config; }
+        ss::gate& gate() { return _gate; }
 
         virtual size_t segment_count() const = 0;
         virtual storage::offset_stats offsets() const = 0;
@@ -90,6 +92,7 @@ public:
         ntp_config _config;
 
     protected:
+        ss::gate _gate;
         ntp_config& mutable_config() { return _config; }
         ss::lw_shared_ptr<storage::stm_manager> _stm_manager;
     };
@@ -97,7 +100,9 @@ public:
 public:
     explicit log(ss::shared_ptr<impl> i)
       : _impl(std::move(i)) {}
-    ss::future<> close() { return _impl->close(); }
+    ss::future<> close() {
+        return _impl->gate().close().then([this] { return _impl->close(); });
+    }
     ss::future<> remove() { return _impl->remove(); }
     ss::future<> flush() { return _impl->flush(); }
 

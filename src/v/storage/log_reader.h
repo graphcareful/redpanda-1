@@ -135,7 +135,10 @@ public:
     using storage_t = model::record_batch_reader::storage_t;
 
     log_reader(
-      std::unique_ptr<lock_manager::lease>, log_reader_config, probe&) noexcept;
+      std::unique_ptr<lock_manager::lease>,
+      log_reader_config,
+      probe&,
+      ss::gate&) noexcept;
 
     ~log_reader() final {
         vassert(!_iterator.reader, "log reader destroyed with live reader");
@@ -147,7 +150,10 @@ public:
 
     ss::future<storage_t> do_load_slice(model::timeout_clock::time_point) final;
 
-    ss::future<> finally() noexcept final { return _iterator.close(); }
+    ss::future<> finally() noexcept final {
+        _gate.leave();
+        return _iterator.close();
+    }
 
     void print(std::ostream& os) final {
         fmt::print(os, "storage::log_reader. config {}", _config);
@@ -236,6 +242,7 @@ private:
     log_reader_config _config;
     model::offset _last_base;
     probe& _probe;
+    ss::gate& _gate;
     ss::abort_source::subscription _as_sub;
 };
 

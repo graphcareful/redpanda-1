@@ -263,6 +263,7 @@ ss::future<> log_reader::find_next_valid_iterator() {
 
 ss::future<log_reader::storage_t>
 log_reader::do_load_slice(model::timeout_clock::time_point timeout) {
+    _gate.enter();
     if (is_done()) {
         // must keep this function because, the segment might not be done
         // but offsets might have exceeded the read

@@ -25,11 +25,13 @@ disk_log_appender::disk_log_appender(
   disk_log_impl& log,
   log_append_config config,
   log_clock::time_point append_time,
+  ss::gate& gate,
   model::offset next_offset) noexcept
   : _log(log)
   , _config(config)
   , _append_time(append_time)
   , _idx(next_offset)
+  , _gate(gate)
   , _base_offset(next_offset) {}
 
 ss::future<> disk_log_appender::initialize() {
@@ -70,6 +72,7 @@ void disk_log_appender::release_lock() {
 
 ss::future<ss::stop_iteration>
 disk_log_appender::operator()(model::record_batch& batch) {
+    auto holder = _gate.hold();
     batch.header().base_offset = _idx;
     batch.header().header_crc = model::internal_header_only_crc(batch.header());
     if (_last_term != batch.term()) {
@@ -102,7 +105,8 @@ disk_log_appender::operator()(model::record_batch& batch) {
           vlog(stlog.info, "Could not append batch: {} - {}", e, *this);
           _log.get_probe().batch_write_error(e);
           return ss::make_exception_future<ss::stop_iteration>(e);
-      });
+      })
+      .finally([holder] {});
 }
 
 ss::future<ss::stop_iteration>

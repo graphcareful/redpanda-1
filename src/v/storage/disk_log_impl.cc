@@ -733,7 +733,7 @@ log_appender disk_log_impl::make_appender(log_append_config cfg) {
         }
     }
     return log_appender(
-      std::make_unique<disk_log_appender>(*this, cfg, now, next_offset));
+      std::make_unique<disk_log_appender>(*this, cfg, now, _gate, next_offset));
 }
 
 ss::future<> disk_log_impl::flush() {
@@ -816,7 +816,7 @@ disk_log_impl::make_unchecked_reader(log_reader_config config) {
     return _lock_mngr.range_lock(config).then(
       [this, cfg = config](std::unique_ptr<lock_manager::lease> lease) {
           return model::make_record_batch_reader<log_reader>(
-            std::move(lease), cfg, _probe);
+            std::move(lease), cfg, _probe, _gate);
       });
 }
 
@@ -831,7 +831,8 @@ disk_log_impl::make_cached_reader(log_reader_config config) {
     }
     return _lock_mngr.range_lock(config)
       .then([this, cfg = config](std::unique_ptr<lock_manager::lease> lease) {
-          return std::make_unique<log_reader>(std::move(lease), cfg, _probe);
+          return std::make_unique<log_reader>(
+            std::move(lease), cfg, _probe, _gate);
       })
       .then([this](auto rdr) { return _readers_cache->put(std::move(rdr)); });
 }

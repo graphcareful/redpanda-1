@@ -14,6 +14,7 @@
 #include "storage/log_appender.h"
 #include "storage/segment.h"
 
+#include <seastar/core/gate.hh>
 #include <seastar/core/rwlock.hh>
 
 namespace storage {
@@ -26,6 +27,7 @@ public:
       disk_log_impl& log,
       log_append_config config,
       log_clock::time_point append_time,
+      ss::gate& gate,
       model::offset next_offset) noexcept;
 
     ss::future<ss::stop_iteration> operator()(model::record_batch&) final;
@@ -48,6 +50,7 @@ private:
     log_append_config _config;
     log_clock::time_point _append_time;
     model::offset _idx;
+    ss::gate& _gate;
 
     ss::lw_shared_ptr<segment> _seg;
     std::optional<ss::rwlock::holder> _seg_lock;
