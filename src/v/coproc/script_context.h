@@ -83,6 +83,9 @@ public:
     /// when there is no more data to read.
     ss::future<> wait_idle_state();
 
+    /// Returns copy of active routes
+    routes_t get_routes() const { return _routes; }
+
 private:
     ss::future<> do_execute();
 
