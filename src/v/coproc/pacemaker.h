@@ -122,6 +122,10 @@ public:
     /// returns a handle to the reconnect transport
     shared_script_resources& resources() { return _shared_res; }
 
+    /// Removes the materialized topic post-shutdown
+    ss::future<absl::flat_hash_map<script_id, errc>>
+    remove_materialized(model::ntp source, model::ntp materialized);
+
 private:
     void do_add_source(
       script_id,

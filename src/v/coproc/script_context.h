@@ -72,7 +72,13 @@ public:
     /// Returns copy of active routes
     routes_t get_routes() const { return _routes; }
 
+    /// Removes a materialized topic from the output set
+    ///
+    /// Should be called when a materialized topic is deleted
+    ss::future<errc> remove_output(model::ntp source, model::ntp target);
+
 private:
+    void process_updates();
     ss::future<> do_execute();
 
     ss::future<>
@@ -81,6 +87,13 @@ private:
     ss::future<> process_reply(process_batch_reply);
 
 private:
+    struct remove_destination {
+        model::ntp source;
+        model::ntp target;
+        ss::promise<errc> p;
+    };
+    std::vector<remove_destination> _updates;
+
     /// Killswitch for in-process reads
     ss::abort_source _abort_source;
 

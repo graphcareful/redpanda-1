@@ -280,4 +280,17 @@ bool pacemaker::local_script_id_exists(script_id id) {
     return _scripts.find(id) != _scripts.end();
 }
 
+ss::future<absl::flat_hash_map<script_id, errc>>
+pacemaker::remove_materialized(model::ntp source, model::ntp materialized) {
+    absl::flat_hash_map<script_id, errc> rs;
+    std::vector<ss::future<>> fs;
+    for (auto& [id, script] : _scripts) {
+        fs.push_back(script->remove_output(source, materialized)
+                       .then([&rs, id = id](errc e) { rs.emplace(id, e); }));
+    }
+    co_await ss::when_all_succeed(fs.begin(), fs.end());
+    _shared_res.log_mtx.erase(materialized);
+    co_return rs;
+}
+
 } // namespace coproc

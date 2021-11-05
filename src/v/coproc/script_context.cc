@@ -71,6 +71,7 @@ ss::future<> script_context::do_execute() {
             return ss::make_ready_future<ss::stop_iteration>(
               ss::stop_iteration::yes);
         }
+        process_updates();
         return _resources.transport.get_connected(model::no_timeout)
           .then([this](result<rpc::transport*> transport) {
               if (!transport) {
@@ -106,6 +107,33 @@ ss::future<> script_context::do_execute() {
 ss::future<> script_context::shutdown() {
     _abort_source.request_abort();
     return _gate.close();
+}
+
+void script_context::process_updates() {
+    auto updates = std::exchange(_updates, {});
+    for (auto& u : updates) {
+        auto fs = _routes.find(u.source);
+        if (fs == _routes.end()) {
+            u.p.set_value(errc::topic_does_not_exist);
+            continue;
+        }
+        auto success = fs->second->wctx.offsets.erase(u.target);
+        u.p.set_value(success > 0 ? errc::success : errc::topic_does_not_exist);
+    }
+}
+
+ss::future<errc>
+script_context::remove_output(model::ntp source, model::ntp target) {
+    auto fs = _routes.find(source);
+    if (
+      fs == _routes.end()
+      || (fs->second->wctx.offsets.find(target) == fs->second->wctx.offsets.end())) {
+        return ss::make_ready_future<errc>(errc::topic_does_not_exist);
+    }
+    remove_destination er{
+      .source = std::move(source), .target = std::move(target)};
+    _updates.emplace_back(std::move(er));
+    return _updates.back().p.get_future();
 }
 
 ss::future<> script_context::send_request(
