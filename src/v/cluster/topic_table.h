@@ -61,22 +61,14 @@ public:
       model::topic_namespace_hash,
       model::topic_namespace_eq>;
 
+    template<typename delta_type>
     using delta_cb_t
-      = ss::noncopyable_function<void(const std::vector<delta>&)>;
+      = ss::noncopyable_function<void(const std::vector<delta_type>&)>;
 
-    cluster::notification_id_type register_delta_notification(delta_cb_t cb) {
-        auto id = _notification_id++;
-        _notifications.emplace_back(id, std::move(cb));
-        return id;
-    }
+    cluster::notification_id_type
+      register_delta_notification(delta_cb_t<delta>);
 
-    void unregister_delta_notification(cluster::notification_id_type id) {
-        std::erase_if(
-          _notifications,
-          [id](const std::pair<cluster::notification_id_type, delta_cb_t>& n) {
-              return n.first == id;
-          });
-    }
+    void unregister_delta_notification(cluster::notification_id_type);
 
     bool is_batch_applicable(const model::record_batch& b) const {
         return b.header().type
@@ -110,9 +102,9 @@ public:
 
     /// Delta API
 
-    ss::future<std::vector<delta>> wait_for_changes(ss::abort_source&);
+    ss::future<std::vector<delta>> wait_for_changes(ss::abort_source& as);
 
-    bool has_pending_changes() const { return !_pending_deltas.empty(); }
+    bool has_pending_changes() const;
 
     /// Query API
 
@@ -155,16 +147,47 @@ public:
     bool is_update_in_progress(const model::ntp&) const;
 
 private:
-    struct waiter {
-        explicit waiter(uint64_t id)
-          : id(id) {}
-        ss::promise<std::vector<delta>> promise;
-        ss::abort_source::subscription sub;
-        uint64_t id;
-    };
-    void deallocate_topic_partitions(const std::vector<partition_assignment>&);
+    template<typename delta_type>
+    class wait_notification {
+    public:
+        struct waiter {
+            explicit waiter(uint64_t id)
+              : id(id) {}
+            ss::promise<std::vector<delta_type>> promise;
+            ss::abort_source::subscription sub;
+            uint64_t id;
+        };
 
-    void notify_waiters();
+        template<typename... Args>
+        void emplace_deltas(Args&&... args) {
+            _pending_deltas.emplace_back(std::forward<Args>(args)...);
+        }
+
+        bool has_pending_changes() const { return !_pending_deltas.empty(); }
+
+        void notify_waiters();
+
+        ss::future<std::vector<delta_type>>
+        wait_for_changes(ss::abort_source& as);
+
+        ss::future<> stop();
+
+        cluster::notification_id_type
+        register_delta_notification(delta_cb_t<delta_type> cb);
+        void unregister_delta_notification(cluster::notification_id_type id);
+
+    private:
+        uint64_t _waiter_id{0};
+        std::vector<delta_type> _pending_deltas;
+        std::vector<std::unique_ptr<waiter>> _waiters;
+
+        cluster::notification_id_type _notification_id{0};
+        std::vector<
+          std::pair<cluster::notification_id_type, delta_cb_t<delta_type>>>
+          _notifications;
+    };
+
+    void deallocate_topic_partitions(const std::vector<partition_assignment>&);
 
     template<typename Func>
     std::vector<std::invoke_result_t<Func, topic_configuration_assignment>>
@@ -175,11 +198,6 @@ private:
 
     absl::flat_hash_set<model::ntp> _update_in_progress;
 
-    std::vector<delta> _pending_deltas;
-    std::vector<std::unique_ptr<waiter>> _waiters;
-    cluster::notification_id_type _notification_id{0};
-    std::vector<std::pair<cluster::notification_id_type, delta_cb_t>>
-      _notifications;
-    uint64_t _waiter_id{0};
+    wait_notification<delta> _updates;
 };
 } // namespace cluster

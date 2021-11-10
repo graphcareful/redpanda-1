@@ -78,30 +78,23 @@ topic_table::apply(create_topic_cmd cmd, model::offset offset) {
     // calculate delta
     for (auto& pas : cmd.value.assignments) {
         auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, pas.id);
-        _pending_deltas.emplace_back(
+        _updates.emplace_deltas(
           std::move(ntp), pas, offset, delta::op_type::add);
     }
 
     _topics.insert(
       {cmd.key,
        topic_metadata(std::move(cmd.value), model::revision_id(offset()))});
-    notify_waiters();
+    _updates.notify_waiters();
     return ss::make_ready_future<std::error_code>(errc::success);
 }
 
-ss::future<> topic_table::stop() {
-    for (auto& w : _waiters) {
-        w->promise.set_exception(ss::abort_requested_exception());
-    }
-    return ss::now();
-}
+ss::future<> topic_table::stop() { co_await _updates.stop(); }
 
 ss::future<std::error_code>
 topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
-    auto delete_type = delta::op_type::del;
     if (auto tp = _topics.find(cmd.value); tp != _topics.end()) {
         if (!tp->second.is_topic_replicable()) {
-            delete_type = delta::op_type::del_non_replicable;
             model::topic_namespace_view tp_nsv{
               cmd.key.ns, tp->second.get_source_topic()};
             auto found = _topics_hierarchy.find(tp_nsv);
@@ -126,11 +119,11 @@ topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
 
         for (auto& p : tp->second.configuration.assignments) {
             auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, p.id);
-            _pending_deltas.emplace_back(
-              std::move(ntp), std::move(p), offset, delete_type);
+            _updates.emplace_deltas(
+              std::move(ntp), std::move(p), offset, delta::op_type::del);
         }
         _topics.erase(tp);
-        notify_waiters();
+        _updates.notify_waiters();
         return ss::make_ready_future<std::error_code>(errc::success);
     }
     return ss::make_ready_future<std::error_code>(errc::topic_not_exists);
@@ -153,11 +146,11 @@ topic_table::apply(create_partition_cmd cmd, model::offset offset) {
         tp->second.configuration.assignments.push_back(p_as);
         // propagate deltas
         auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, p_as.id);
-        _pending_deltas.emplace_back(
+        _updates.emplace_deltas(
           std::move(ntp), std::move(p_as), offset, delta::op_type::add);
     }
 
-    notify_waiters();
+    _updates.notify_waiters();
     co_return errc::success;
 }
 
@@ -198,14 +191,14 @@ topic_table::apply(move_partition_replicas_cmd cmd, model::offset o) {
 
     // calculate deleta for backend
     model::ntp ntp(tp->first.ns, tp->first.tp, current_assignment_it->id);
-    _pending_deltas.emplace_back(
+    _updates.emplace_deltas(
       std::move(ntp),
       *current_assignment_it,
       o,
       delta::op_type::update,
       previous_assignment);
 
-    notify_waiters();
+    _updates.notify_waiters();
 
     return ss::make_ready_future<std::error_code>(errc::success);
 }
@@ -244,13 +237,13 @@ topic_table::apply(finish_moving_partition_replicas_cmd cmd, model::offset o) {
     };
 
     // notify backend about finished update
-    _pending_deltas.emplace_back(
+    _updates.emplace_deltas(
       std::move(cmd.key),
       std::move(delta_assignment),
       o,
       delta::op_type::update_finished);
 
-    notify_waiters();
+    _updates.notify_waiters();
 
     return ss::make_ready_future<std::error_code>(errc::success);
 }
@@ -317,17 +310,14 @@ topic_table::apply(update_topic_properties_cmd cmd, model::offset o) {
     std::vector<topic_table_delta> deltas;
     deltas.reserve(tp->second.configuration.assignments.size());
     for (const auto& p_as : tp->second.configuration.assignments) {
-        deltas.emplace_back(
+        _updates.emplace_deltas(
           model::ntp(cmd.key.ns, cmd.key.tp, p_as.id),
           p_as,
           o,
           delta::op_type::update_properties);
     }
 
-    std::move(
-      deltas.begin(), deltas.end(), std::back_inserter(_pending_deltas));
-
-    notify_waiters();
+    _updates.notify_waiters();
 
     co_return make_error_code(errc::success);
 }
@@ -347,7 +337,8 @@ topic_table::apply(create_non_replicable_topic_cmd cmd, model::offset o) {
       tp->second.is_topic_replicable(), "Source topic must be replicable");
 
     for (const auto& pas : tp->second.configuration.assignments) {
-        _pending_deltas.emplace_back(
+        _updates.emplace_deltas(
+          model::ntp(source.ns, source.tp, pas.id),
           model::ntp(new_non_rep_topic.ns, new_non_rep_topic.tp, pas.id),
           pas,
           o,
@@ -373,15 +364,16 @@ topic_table::apply(create_non_replicable_topic_cmd cmd, model::offset o) {
     }
     _topics.insert(
       {new_non_rep_topic, topic_metadata(std::move(ca), source.tp)});
-    notify_waiters();
+    _updates.notify_waiters();
     co_return make_error_code(errc::success);
 }
 
-void topic_table::notify_waiters() {
+template<typename delta_type>
+void topic_table::wait_notification<delta_type>::notify_waiters() {
     if (_waiters.empty()) {
         return;
     }
-    std::vector<delta> changes;
+    std::vector<delta_type> changes;
     changes.swap(_pending_deltas);
     for (auto& cb : _notifications) {
         cb.second(changes);
@@ -395,7 +387,56 @@ void topic_table::notify_waiters() {
 
 ss::future<std::vector<topic_table::delta>>
 topic_table::wait_for_changes(ss::abort_source& as) {
-    using ret_t = std::vector<topic_table::delta>;
+    return _updates.wait_for_changes(as);
+}
+
+bool topic_table::has_pending_changes() const {
+    return !_updates.has_pending_changes();
+}
+
+cluster::notification_id_type
+topic_table::register_delta_notification(delta_cb_t<delta> cb) {
+    return _updates.register_delta_notification(std::move(cb));
+}
+
+void topic_table::unregister_delta_notification(
+  cluster::notification_id_type id) {
+    _updates.unregister_delta_notification(id);
+}
+
+template<typename delta_type>
+ss::future<> topic_table::wait_notification<delta_type>::stop() {
+    for (auto& w : _waiters) {
+        w->promise.set_exception(ss::abort_requested_exception());
+    }
+    return ss::now();
+}
+
+template<typename delta_type>
+cluster::notification_id_type
+topic_table::wait_notification<delta_type>::register_delta_notification(
+  delta_cb_t<delta_type> cb) {
+    auto id = _notification_id++;
+    _notifications.emplace_back(id, std::move(cb));
+    return id;
+}
+
+template<typename delta_type>
+void topic_table::wait_notification<delta_type>::unregister_delta_notification(
+  cluster::notification_id_type id) {
+    std::erase_if(
+      _notifications,
+      [id](
+        const std::pair<cluster::notification_id_type, delta_cb_t<delta>>& n) {
+          return n.first == id;
+      });
+}
+
+template<typename delta_type>
+ss::future<std::vector<delta_type>>
+topic_table::wait_notification<delta_type>::wait_for_changes(
+  ss::abort_source& as) {
+    using ret_t = std::vector<delta_type>;
     if (!_pending_deltas.empty()) {
         ret_t ret;
         ret.swap(_pending_deltas);
