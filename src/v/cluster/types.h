@@ -566,6 +566,27 @@ struct topic_table_delta {
     friend std::ostream& operator<<(std::ostream&, const op_type&);
 };
 
+struct non_replicable_topic_table_delta {
+    enum class op_type { add, del };
+
+    non_replicable_topic_table_delta(
+      model::ntp,
+      model::ntp,
+      cluster::partition_assignment,
+      model::offset,
+      op_type);
+
+    model::ntp src;
+    model::ntp ntp;
+    cluster::partition_assignment new_assignment;
+    model::offset offset;
+    op_type type;
+
+    friend std::ostream&
+    operator<<(std::ostream&, const non_replicable_topic_table_delta&);
+    friend std::ostream& operator<<(std::ostream&, const op_type&);
+};
+
 struct create_acls_cmd_data {
     static constexpr int8_t current_version = 1;
     std::vector<security::acl_binding> bindings;

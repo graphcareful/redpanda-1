@@ -122,6 +122,18 @@ topic_table_delta::topic_table_delta(
   , type(tp)
   , previous_assignment(std::move(previous)) {}
 
+non_replicable_topic_table_delta::non_replicable_topic_table_delta(
+  model::ntp src,
+  model::ntp ntp,
+  cluster::partition_assignment new_assignment,
+  model::offset o,
+  op_type tp)
+  : src(std::move(src))
+  , ntp(std::move(ntp))
+  , new_assignment(std::move(new_assignment))
+  , offset(o)
+  , type(tp) {}
+
 ntp_reconciliation_state::ntp_reconciliation_state(
   model::ntp ntp,
   std::vector<backend_operation> ops,
@@ -240,6 +252,31 @@ std::ostream& operator<<(std::ostream& o, const topic_table_delta& d) {
       d.offset,
       d.new_assignment,
       d.previous_assignment);
+
+    return o;
+}
+
+std::ostream& operator<<(
+  std::ostream& o, const non_replicable_topic_table_delta::op_type& tp) {
+    switch (tp) {
+    case non_replicable_topic_table_delta::op_type::add:
+        return o << "addition";
+    case non_replicable_topic_table_delta::op_type::del:
+        return o << "deletion";
+    }
+    __builtin_unreachable();
+}
+
+std::ostream&
+operator<<(std::ostream& o, const non_replicable_topic_table_delta& d) {
+    fmt::print(
+      o,
+      "{{type: {}, src: {}, ntp: {}, offset: {}, new_assignment: {}}}",
+      d.type,
+      d.src,
+      d.ntp,
+      d.offset,
+      d.new_assignment);
 
     return o;
 }
