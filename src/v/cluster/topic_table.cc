@@ -89,7 +89,10 @@ topic_table::apply(create_topic_cmd cmd, model::offset offset) {
     return ss::make_ready_future<std::error_code>(errc::success);
 }
 
-ss::future<> topic_table::stop() { co_await _updates.stop(); }
+ss::future<> topic_table::stop() {
+    co_await _updates.stop();
+    co_await _non_rep_updates.stop();
+}
 
 ss::future<std::error_code>
 topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
@@ -390,8 +393,17 @@ topic_table::wait_for_changes(ss::abort_source& as) {
     return _updates.wait_for_changes(as);
 }
 
+ss::future<std::vector<topic_table::non_rep_delta>>
+topic_table::wait_for_non_rep_changes(ss::abort_source& as) {
+    return _non_rep_updates.wait_for_changes(as);
+}
+
 bool topic_table::has_pending_changes() const {
     return !_updates.has_pending_changes();
+}
+
+bool topic_table::has_non_rep_pending_changes() const {
+    return !_non_rep_updates.has_pending_changes();
 }
 
 cluster::notification_id_type

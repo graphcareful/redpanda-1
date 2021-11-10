@@ -34,6 +34,7 @@ namespace cluster {
 class topic_table {
 public:
     using delta = topic_table_delta;
+    using non_rep_delta = non_replicable_topic_table_delta;
     class topic_metadata {
     public:
         topic_metadata(
@@ -103,8 +104,11 @@ public:
     /// Delta API
 
     ss::future<std::vector<delta>> wait_for_changes(ss::abort_source& as);
+    ss::future<std::vector<non_rep_delta>>
+    wait_for_non_rep_changes(ss::abort_source& as);
 
     bool has_pending_changes() const;
+    bool has_non_rep_pending_changes() const;
 
     /// Query API
 
@@ -199,5 +203,6 @@ private:
     absl::flat_hash_set<model::ntp> _update_in_progress;
 
     wait_notification<delta> _updates;
+    wait_notification<non_rep_delta> _non_rep_updates;
 };
 } // namespace cluster
