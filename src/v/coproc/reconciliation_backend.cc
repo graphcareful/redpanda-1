@@ -11,9 +11,11 @@
 
 #include "coproc/reconciliation_backend.h"
 
+#include "cluster/shard_table.h"
 #include "cluster/topic_table.h"
 #include "coproc/logger.h"
 #include "coproc/pacemaker.h"
+#include "storage/api.h"
 
 #include <seastar/core/coroutine.hh>
 
@@ -24,7 +26,8 @@ reconciliation_backend::reconciliation_backend(
   ss::sharded<cluster::shard_table>& shard_table,
   ss::sharded<storage::api>& storage,
   ss::sharded<pacemaker>& pacemaker) noexcept
-  : _topics(topics)
+  : _data_directory(config::node().data_directory().as_sstring())
+  , _topics(topics)
   , _shard_table(shard_table)
   , _storage(storage)
   , _pacemaker(pacemaker) {}
@@ -80,6 +83,59 @@ reconciliation_backend::process_updates(std::vector<update_t> deltas) {
     co_await ss::with_semaphore(_sem, 1, std::move(fn));
 }
 
-ss::future<> reconciliation_backend::process_update(update_t) {}
+ss::future<> reconciliation_backend::process_update(update_t update) {
+    using op_t = update_t::op_type;
+    switch(update.type){
+    case op_t::add:
+        if (!has_local_replicas(_self, delta.new_assignment.replicas)) {
+            return ss::make_ready_future<std::error_code>(errc::success);
+        }
+        return create_non_replicable_partition(delta.ntp, rev);
+    case op_t::del:
+        return delete_non_replicable_partition(delta.ntp, rev).then([] {
+            return std::error_code(errc::success);
+        });
+    }
+}
+
+ss::future<> reconciliation_backend::delete_non_replicable_partition(
+  model::ntp ntp, model::revision_id rev) {
+    vlog(coproclog.trace, "removing {} from shard table at {}", ntp, rev);
+    co_await _shard_table.invoke_on_all(
+      [ntp, rev](cluster::shard_table& st) { st.erase(ntp, rev); });
+    auto log = _storage.local().log_mgr().get(ntp);
+    if (log && log->config().get_revision() < rev) {
+        co_await _storage.local().log_mgr().remove(ntp);
+    }
+}
+
+ss::future<std::error_code>
+reconciliation_backend::create_non_replicable_partition(
+  model::ntp ntp, model::revision_id rev) {
+    auto cfg = _topics.local().get_topic_cfg(model::topic_namespace_view(ntp));
+    if (!cfg) {
+        // partition was already removed, do nothing
+        co_return errc::success;
+    }
+    vassert(
+      !_storage.local().log_mgr().get(ntp),
+      "Log exists for missing entry in topics_table");
+    auto ntp_cfg = cfg->make_ntp_config(_data_directory, ntp.tp.partition, rev);
+    co_await _storage.local().log_mgr().manage(std::move(ntp_cfg));
+    co_await add_to_shard_table(std::move(ntp), ss::this_shard_id(), rev);
+    co_return errc::success;
+}
+
+ss::future<> reconciliation_backend::add_to_shard_table(
+  model::ntp ntp, ss::shard_id shard, model::revision_id revision) {
+    vlog(
+      coproclog.trace, "adding {} to shard table at {}", revision, ntp, shard);
+    return _shard_table.invoke_on_all(
+      [ntp = std::move(ntp), shard, revision](cluster::shard_table& s) mutable {
+          vassert(
+            s.update_shard(ntp, shard, revision),
+            "Newer revision for non-replicable ntp exists");
+      });
+}
 
 } // namespace coproc

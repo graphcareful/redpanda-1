@@ -535,15 +535,7 @@ private:
 };
 // delta propagated to backend
 struct topic_table_delta {
-    enum class op_type {
-        add,
-        del,
-        update,
-        update_finished,
-        update_properties,
-        add_non_replicable,
-        del_non_replicable
-    };
+    enum class op_type { add, del, update, update_finished, update_properties };
 
     topic_table_delta(
       model::ntp,

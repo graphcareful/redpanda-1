@@ -109,6 +109,17 @@ topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
               found->second.erase(cmd.value) > 0,
               "non_replicable_topic should exist in hierarchy: {}",
               tp_nsv);
+            for (auto& p : tp->second.configuration.assignments) {
+                auto src = model::ntp(tp_nsv.ns, tp_nsv.tp, p.id);
+                auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, p.id);
+                _non_rep_updates.emplace_deltas(
+                  std::move(src),
+                  std::move(ntp),
+                  std::move(p),
+                  offset,
+                  non_rep_delta::op_type::del);
+            }
+            _non_rep_updates.notify_waiters();
         } else {
             /// Prevent deletion of source topics that have non_replicable
             /// topics. To delete this topic all of its non_replicable descedent
@@ -118,15 +129,15 @@ topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
                 return ss::make_ready_future<std::error_code>(
                   errc::source_topic_still_in_use);
             }
+            for (auto& p : tp->second.configuration.assignments) {
+                auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, p.id);
+                _updates.emplace_deltas(
+                  std::move(ntp), std::move(p), offset, delta::op_type::del);
+            }
+            _updates.notify_waiters();
         }
 
-        for (auto& p : tp->second.configuration.assignments) {
-            auto ntp = model::ntp(cmd.key.ns, cmd.key.tp, p.id);
-            _updates.emplace_deltas(
-              std::move(ntp), std::move(p), offset, delta::op_type::del);
-        }
         _topics.erase(tp);
-        _updates.notify_waiters();
         return ss::make_ready_future<std::error_code>(errc::success);
     }
     return ss::make_ready_future<std::error_code>(errc::topic_not_exists);
@@ -340,12 +351,12 @@ topic_table::apply(create_non_replicable_topic_cmd cmd, model::offset o) {
       tp->second.is_topic_replicable(), "Source topic must be replicable");
 
     for (const auto& pas : tp->second.configuration.assignments) {
-        _updates.emplace_deltas(
+        _non_rep_updates.emplace_deltas(
           model::ntp(source.ns, source.tp, pas.id),
           model::ntp(new_non_rep_topic.ns, new_non_rep_topic.tp, pas.id),
           pas,
           o,
-          delta::op_type::add_non_replicable);
+          non_rep_delta::op_type::add);
     }
 
     auto ca = tp->second.configuration;
@@ -367,7 +378,7 @@ topic_table::apply(create_non_replicable_topic_cmd cmd, model::offset o) {
     }
     _topics.insert(
       {new_non_rep_topic, topic_metadata(std::move(ca), source.tp)});
-    _updates.notify_waiters();
+    _non_rep_updates.notify_waiters();
     co_return make_error_code(errc::success);
 }
 
