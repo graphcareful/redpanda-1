@@ -36,6 +36,9 @@ public:
     ss::future<> stop();
 
     ss::sharded<pacemaker>& get_pacemaker() { return _pacemaker; }
+    ss::sharded<partition_manager>& get_partition_manager() {
+        return _partition_manager;
+    }
 
 private:
     unresolved_address _engine_addr;
