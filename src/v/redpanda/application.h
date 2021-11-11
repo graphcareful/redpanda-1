@@ -103,11 +103,6 @@ private:
     void validate_arguments(const po::variables_map&);
     void hydrate_config(const po::variables_map&);
 
-    bool coproc_enabled() {
-        const auto& cfg = config::shard_local_cfg();
-        return cfg.developer_mode() && cfg.enable_coproc();
-    }
-
     bool archival_storage_enabled();
 
     template<typename Service, typename... Args>

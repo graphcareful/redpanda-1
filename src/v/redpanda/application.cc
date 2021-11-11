@@ -702,19 +702,17 @@ void application::wire_up_redpanda_services() {
       std::ref(coordinator_ntp_mapper))
       .get();
 
-    if (coproc_enabled()) {
-        syschecks::systemd_message("Creating coproc::api").get();
-        construct_single_service(
-          coprocessing,
-          config::node().coproc_supervisor_server(),
-          std::ref(storage),
-          std::ref(controller->get_topics_state()),
-          std::ref(shard_table),
-          std::ref(controller->get_topics_frontend()),
-          std::ref(metadata_cache),
-          std::ref(partition_manager));
-        coprocessing->start().get();
-    }
+    syschecks::systemd_message("Creating coproc::api").get();
+    construct_single_service(
+      coprocessing,
+      config::node().coproc_supervisor_server(),
+      std::ref(storage),
+      std::ref(controller->get_topics_state()),
+      std::ref(shard_table),
+      std::ref(controller->get_topics_frontend()),
+      std::ref(metadata_cache),
+      std::ref(partition_manager));
+    coprocessing->start().get();
 
     // metrics and quota management
     syschecks::systemd_message("Adding kafka quota manager").get();
