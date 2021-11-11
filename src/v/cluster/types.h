@@ -562,6 +562,11 @@ struct topic_table_delta {
         return model::topic_namespace_view(ntp);
     }
 
+    bool is_non_replicable() const {
+        return type == op_type::add_non_replicable
+               || type == op_type::del_non_replicable;
+    }
+
     friend std::ostream& operator<<(std::ostream&, const topic_table_delta&);
     friend std::ostream& operator<<(std::ostream&, const op_type&);
 };
