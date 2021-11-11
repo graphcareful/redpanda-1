@@ -82,7 +82,7 @@ static ss::future<list_offset_partition_response> list_offsets_partition(
        isolation_lvl = model::isolation_level(
          octx.request.data.isolation_level)](cluster::partition_manager& mgr) {
           auto kafka_partition = make_partition_proxy(
-            ntp, octx.rctx.metadata_cache(), mgr);
+            ntp, mgr, octx.rctx.coproc_partition_manager().local());
           if (!kafka_partition) {
               return ss::make_ready_future<list_offset_partition_response>(
                 list_offsets_response::make_partition(
