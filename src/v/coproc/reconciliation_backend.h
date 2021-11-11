@@ -39,7 +39,7 @@ public:
 
 private:
     using update_t = cluster::topic_table::non_rep_delta;
-    ss::future<> process_update(update_t);
+    ss::future<std::error_code> process_update(update_t);
     ss::future<> process_updates(std::vector<update_t>);
 
     ss::future<> fetch_and_reconcile();

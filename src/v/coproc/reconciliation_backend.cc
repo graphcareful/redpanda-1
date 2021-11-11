@@ -11,6 +11,7 @@
 
 #include "coproc/reconciliation_backend.h"
 
+#include "cluster/cluster_utils.h"
 #include "cluster/shard_table.h"
 #include "cluster/topic_table.h"
 #include "coproc/logger.h"
@@ -68,7 +69,7 @@ ss::future<> reconciliation_backend::fetch_and_reconcile() {
       topic_deltas.begin(),
       topic_deltas.end(),
       [this](delta_grouping_t::value_type& deltas) {
-          return process_update(deltas.second);
+          return process_updates(deltas.second);
       });
 }
 
@@ -77,17 +78,27 @@ reconciliation_backend::process_updates(std::vector<update_t> deltas) {
     auto hold = _gate.hold();
     auto fn = [this, deltas = std::move(deltas)]() mutable -> ss::future<> {
         for (auto& d : deltas) {
-            co_await process_update(std::move(d));
+            auto err = co_await process_update(d);
+            if (err != errc::success) {
+                vlog(
+                  coproclog.warn,
+                  "Result {} returned after processing update {}",
+                  err,
+                  d);
+            }
         }
     };
     co_await ss::with_semaphore(_sem, 1, std::move(fn));
 }
 
-ss::future<> reconciliation_backend::process_update(update_t update) {
+ss::future<std::error_code>
+reconciliation_backend::process_update(update_t delta) {
     using op_t = update_t::op_type;
-    switch(update.type){
+    model::revision_id rev(delta.offset());
+    switch (delta.type) {
     case op_t::add:
-        if (!has_local_replicas(_self, delta.new_assignment.replicas)) {
+        if (!cluster::has_local_replicas(
+              _self, delta.new_assignment.replicas)) {
             return ss::make_ready_future<std::error_code>(errc::success);
         }
         return create_non_replicable_partition(delta.ntp, rev);
@@ -96,6 +107,7 @@ ss::future<> reconciliation_backend::process_update(update_t update) {
             return std::error_code(errc::success);
         });
     }
+    __builtin_unreachable();
 }
 
 ss::future<> reconciliation_backend::delete_non_replicable_partition(
