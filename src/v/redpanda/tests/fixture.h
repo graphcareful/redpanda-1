@@ -19,6 +19,7 @@
 #include "cluster/topics_frontend.h"
 #include "cluster/types.h"
 #include "config/node_config.h"
+#include "coproc/api.h"
 #include "kafka/client/transport.h"
 #include "kafka/protocol/fetch.h"
 #include "kafka/server/handlers/topics/topic_utils.h"
@@ -98,6 +99,7 @@ public:
           app.controller->get_security_frontend(),
           app.controller->get_api(),
           app.tx_gateway_frontend,
+          app.coprocessing->get_partition_manager(),
           app.data_policies,
           std::nullopt);
     }

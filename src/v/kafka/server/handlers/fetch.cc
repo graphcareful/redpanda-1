@@ -178,15 +178,14 @@ static ss::future<read_result> read_from_partition(
  */
 static ss::future<read_result> do_read_from_ntp(
   cluster::partition_manager& mgr,
-  cluster::metadata_cache& md_cache,
+  coproc::partition_manager& cp_mgr,
   ntp_fetch_config ntp_config,
   bool foreign_read,
   std::optional<model::timeout_clock::time_point> deadline) {
     /*
      * lookup the ntp's partition
      */
-    auto kafka_partition = make_partition_proxy(
-      ntp_config.ntp(), md_cache, mgr);
+    auto kafka_partition = make_partition_proxy(ntp_config.ntp(), mgr, cp_mgr);
     if (unlikely(!kafka_partition)) {
         return ss::make_ready_future<read_result>(
           error_code::unknown_topic_or_partition);
@@ -227,13 +226,13 @@ make_ntp_fetch_config(const model::ntp& ntp, const fetch_config& fetch_cfg) {
 
 ss::future<read_result> read_from_ntp(
   cluster::partition_manager& pm,
-  cluster::metadata_cache& md_cache,
+  coproc::partition_manager& cp_pm,
   const model::ntp& ntp,
   fetch_config config,
   bool foreign_read,
   std::optional<model::timeout_clock::time_point> deadline) {
     return do_read_from_ntp(
-      pm, md_cache, make_ntp_fetch_config(ntp, config), foreign_read, deadline);
+      pm, cp_pm, make_ntp_fetch_config(ntp, config), foreign_read, deadline);
 }
 
 static void fill_fetch_responses(
@@ -315,17 +314,15 @@ static void fill_fetch_responses(
 
 static ss::future<std::vector<read_result>> fetch_ntps_in_parallel(
   cluster::partition_manager& mgr,
-  cluster::metadata_cache& md_cache,
+  coproc::partition_manager& cp_mgr,
   std::vector<ntp_fetch_config> ntp_fetch_configs,
   bool foreign_read,
   std::optional<model::timeout_clock::time_point> deadline) {
     return ssx::parallel_transform(
       std::move(ntp_fetch_configs),
-      [&mgr, &md_cache, deadline, foreign_read](
-        const ntp_fetch_config& ntp_cfg) {
+      [&mgr, &cp_mgr, deadline, foreign_read](const ntp_fetch_config& ntp_cfg) {
           auto p_id = ntp_cfg.ntp().tp.partition;
-          return do_read_from_ntp(
-                   mgr, md_cache, ntp_cfg, foreign_read, deadline)
+          return do_read_from_ntp(mgr, cp_mgr, ntp_cfg, foreign_read, deadline)
             .then([p_id](read_result res) {
                 res.partition = p_id;
                 return res;
@@ -365,7 +362,7 @@ handle_shard_fetch(ss::shard_id shard, op_context& octx, shard_fetch fetch) {
           cluster::partition_manager& mgr) mutable {
             return fetch_ntps_in_parallel(
               mgr,
-              octx.rctx.metadata_cache(),
+              octx.rctx.coproc_partition_manager().local(),
               std::move(configs),
               foreign_read,
               deadline);
