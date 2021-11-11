@@ -26,7 +26,8 @@ public:
     explicit reconciliation_backend(
       ss::sharded<cluster::topic_table>&,
       ss::sharded<cluster::shard_table>&,
-      ss::sharded<storage::api>&) noexcept;
+      ss::sharded<cluster::partition_manager>&,
+      ss::sharded<partition_manager>&) noexcept;
 
     /// Starts the reconciliation loop
     ///
@@ -62,7 +63,8 @@ private:
 
     ss::sharded<cluster::topic_table>& _topics;
     ss::sharded<cluster::shard_table>& _shard_table;
-    ss::sharded<storage::api>& _storage;
+    ss::sharded<cluster::partition_manager>& _pm;
+    ss::sharded<partition_manager>& _partition_manager;
 };
 
 } // namespace coproc
