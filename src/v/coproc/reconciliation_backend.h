@@ -42,6 +42,13 @@ private:
 
     ss::future<> fetch_and_reconcile();
 
+    ss::future<>
+    delete_non_replicable_partition(model::ntp ntp, model::revision_id rev);
+    ss::future<std::error_code>
+    create_non_replicable_partition(model::ntp ntp, model::revision_id rev);
+    ss::future<> add_to_shard_table(
+      model::ntp ntp, ss::shard_id shard, model::revision_id revision);
+
 private:
     cluster::notification_id_type _id_cb;
     model::node_id _self;
