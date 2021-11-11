@@ -193,4 +193,9 @@ ss::future<std::error_code> replicate_and_wait(
       });
 }
 
+inline bool has_non_replicable_op_type(const topic_table_delta& d) {
+    return d.type == topic_table_delta::op_type::add_non_replicable
+           || d.type == topic_table_delta::op_type::del_non_replicable;
+}
+
 } // namespace cluster

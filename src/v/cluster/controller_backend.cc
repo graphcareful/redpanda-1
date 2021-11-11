@@ -373,6 +373,10 @@ ss::future<> controller_backend::reconcile_ntp(deltas_t& deltas) {
     bool stop = false;
     auto it = deltas.begin();
     while (!(stop || it == deltas.end())) {
+        if (has_non_replicable_op_type(*it)) {
+            ++it;
+            continue;
+        }
         try {
             auto ec = co_await execute_partitition_op(*it);
             if (ec) {
@@ -536,8 +540,9 @@ controller_backend::execute_partitition_op(const topic_table::delta& delta) {
     case op_t::add_non_replicable:
     case op_t::del_non_replicable:
         /// These events are no-ops because they will be handled by
-        /// coproc::reconciliation_backend.
-        return ss::make_ready_future<std::error_code>(errc::success);
+        /// coproc::reconciliation_backend. Assert because the code should take
+        /// a path where this could not be reached for these event types
+        vassert(false, "Should not be reachable");
     case op_t::del:
         return delete_partition(delta.ntp, rev).then([] {
             return std::error_code(errc::success);
