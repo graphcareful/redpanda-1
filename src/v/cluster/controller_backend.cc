@@ -426,11 +426,13 @@ ss::future<> controller_backend::reconcile_ntp(deltas_t& deltas) {
                         continue;
                     }
                 }
-                vlog(
-                  clusterlog.info,
-                  "partition operation {} result: {}",
-                  *it,
-                  ec.message());
+                if (!it->is_non_replicable()) {
+                    vlog(
+                      clusterlog.info,
+                      "partition operation {} result: {}",
+                      *it,
+                      ec.message());
+                }
                 stop = true;
                 continue;
             }
