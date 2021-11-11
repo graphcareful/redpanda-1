@@ -39,7 +39,7 @@ public:
     bool is_leader() const final { return _partition->is_leader(); }
 
     ss::future<result<model::offset>> linearizable_barrier() {
-        return _partition->linearizable_barrier().then(
+        return _partition->source_partition()->linearizable_barrier().then(
           [this](result<model::offset> r) {
               if (r) {
                   return result<model::offset>(last_stable_offset());
