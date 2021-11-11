@@ -1073,6 +1073,7 @@ void application::start_redpanda() {
             controller->get_security_frontend(),
             controller->get_api(),
             tx_gateway_frontend,
+            coprocessing->get_partition_manager(),
             data_policies,
             qdc_config);
           s.set_protocol(std::move(proto));
