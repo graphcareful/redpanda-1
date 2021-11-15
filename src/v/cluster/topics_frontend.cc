@@ -271,7 +271,7 @@ ss::future<std::vector<topic_result>>
 topics_frontend::create_non_replicable_topics(
   std::vector<non_replicable_topic> topics,
   model::timeout_clock::time_point timeout) {
-    vlog(clusterlog.trace, "Create non_replicable topics {}", topics);
+    vlog(clusterlog.info, "Create non_replicable topics {}", topics);
     std::vector<ss::future<topic_result>> futures;
     futures.reserve(topics.size());
 

@@ -7,11 +7,12 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
+#include "cluster/topic_table.h"
+
 #include "cluster/cluster_utils.h"
 #include "cluster/commands.h"
 #include "cluster/fwd.h"
 #include "cluster/logger.h"
-#include "cluster/topic_table.h"
 #include "cluster/types.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
@@ -352,6 +353,7 @@ topic_table::apply(create_non_replicable_topic_cmd cmd, model::offset o) {
       tp->second.is_topic_replicable(), "Source topic must be replicable");
 
     for (const auto& pas : tp->second.configuration.assignments) {
+        vlog(clusterlog.info, "ASSIGNMENT");
         _pending_deltas.emplace_back(
           model::ntp(new_non_rep_topic.ns, new_non_rep_topic.tp, pas.id),
           pas,
@@ -383,7 +385,7 @@ topic_table::apply(create_non_replicable_topic_cmd cmd, model::offset o) {
 }
 
 void topic_table::notify_waiters() {
-    if (_waiters.empty()) {
+    if (_pending_deltas.empty()) {
         return;
     }
     std::vector<delta> changes;
