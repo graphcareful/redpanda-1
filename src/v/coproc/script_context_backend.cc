@@ -15,6 +15,8 @@
 #include "cluster/non_replicable_topics_frontend.h"
 #include "coproc/exception.h"
 #include "coproc/logger.h"
+#include "coproc/partition.h"
+#include "coproc/partition_manager.h"
 #include "coproc/reference_window_consumer.hpp"
 #include "storage/api.h"
 #include "storage/log.h"
@@ -42,6 +44,10 @@ class retry_trigger_exception final : public exception {
     using exception::exception;
 };
 
+class log_closed_exception final : public exception {
+    using exception::exception;
+};
+
 /// Sets all of the term_ids in a batch of record batches to be a newly
 /// desired term.
 class set_term_id_to_zero {
@@ -61,7 +67,7 @@ private:
 };
 
 static ss::future<> do_write_materialized_partition(
-  storage::log log, model::record_batch_reader reader) {
+  ss::lw_shared_ptr<partition> p, model::record_batch_reader reader) {
     /// Re-write all batch term_ids to 1, otherwise they will carry the
     /// term ids of records coming from parent batches
     auto [success, batch_w_correct_terms]
@@ -73,7 +79,7 @@ static ss::future<> do_write_materialized_partition(
     vassert(
       success,
       "Batch failed crc checks, check wasm engine impl: {}",
-      log.config().ntp());
+      p->config().ntp());
 
     /// Compress the data before writing...
     auto compressed = co_await std::move(batch_w_correct_terms)
@@ -87,7 +93,7 @@ static ss::future<> do_write_materialized_partition(
       .timeout = model::no_timeout};
     /// Finally, write the batch
     co_await std::move(compressed)
-      .for_each_ref(log.make_appender(write_cfg), model::no_timeout)
+      .for_each_ref(p->make_appender(write_cfg), model::no_timeout)
       .discard_result();
 }
 
@@ -127,13 +133,39 @@ static ss::future<> maybe_make_materialized_log(
     /// All requests are debounced, therefore if multiple entities attempt to
     /// create a materialzied topic, all requests will wait for the first to
     /// complete.
-    co_return co_await args.frontend.invoke_on(
-      cluster::non_replicable_topics_frontend_shard,
-      [topics = std::move(topics)](
-        cluster::non_replicable_topics_frontend& mtfe) mutable {
-          return mtfe.create_non_replicable_topics(
-            std::move(topics), model::no_timeout);
-      });
+    try {
+        co_await args.frontend.invoke_on(
+          cluster::non_replicable_topics_frontend_shard,
+          [topics = std::move(topics)](
+            cluster::non_replicable_topics_frontend& mtfe) mutable {
+              return mtfe.create_non_replicable_topics(
+                std::move(topics), model::no_timeout);
+          });
+    } catch (const cluster::non_replicable_topic_creation_exception& ex) {
+        throw log_not_yet_created_exception(ex.what());
+    }
+}
+
+static ss::future<> get_partition_and_write(
+  coproc::partition_manager& pm,
+  model::ntp ntp,
+  model::record_batch_reader reader) {
+    auto found = pm.get(ntp);
+    if (!found) {
+        /// In the case the storage::log has not been created, but the
+        /// topic has.
+        throw log_not_yet_created_exception(ssx::sformat(
+          "Materialized topic {} created but underlying log doesn't "
+          "yet exist",
+          ntp));
+    }
+
+    try {
+        co_await do_write_materialized_partition(found, std::move(reader));
+    } catch (const ss::gate_closed_exception&) {
+        throw log_closed_exception(
+          ssx::sformat("Log {} closed while writing", ntp));
+    }
 }
 
 static ss::future<> write_materialized_partition(
@@ -154,18 +186,8 @@ static ss::future<> write_materialized_partition(
           return maybe_make_materialized_log(
                    source, new_materialized, input->is_leader(), args)
             .then([args, ntp, reader = std::move(reader)]() mutable {
-                auto found = args.storage.local().log_mgr().get(ntp);
-                if (found) {
-                    return do_write_materialized_partition(
-                      *found, std::move(reader));
-                }
-                /// In the case the storage::log has not been created, but the
-                /// topic has.
-                return ss::make_exception_future<>(
-                  log_not_yet_created_exception(ssx::sformat(
-                    "Materialized topic {} created but underlying log doesn't "
-                    "yet exist",
-                    ntp)));
+                return get_partition_and_write(
+                  args.pm.local(), ntp, std::move(reader));
             });
       });
 }
