@@ -42,7 +42,6 @@ public:
 
 private:
     unresolved_address _engine_addr;
-    sys_refs _rs;
 
     std::unique_ptr<wasm::event_listener> _listener; /// one instance
     ss::sharded<pacemaker> _pacemaker;               /// one per core
@@ -51,6 +50,8 @@ private:
     ss::sharded<partition_manager> _partition_manager; /// one per core
     ss::sharded<reconciliation_backend>
       _reconciliation_backend; /// one per core
+
+    sys_refs _rs;
 
     // Event handlers
     std::unique_ptr<wasm::async_event_handler> _wasm_async_handler;
