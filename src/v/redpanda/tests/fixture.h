@@ -263,6 +263,20 @@ public:
     }
 
     ss::future<>
+    wait_for_no_topics(std::vector<cluster::topic_result> results) {
+        return tests::cooperative_spin_wait_with_timeout(
+          2s, [this, results = std::move(results)] {
+              return std::all_of(
+                results.begin(),
+                results.end(),
+                [this](const cluster::topic_result& r) {
+                    return !app.metadata_cache.local().get_topic_metadata(
+                      r.tp_ns);
+                });
+          });
+    }
+
+    ss::future<>
     add_topic(model::topic_namespace_view tp_ns, int partitions = 1) {
         std::vector<cluster::topic_configuration> cfgs{
           cluster::topic_configuration(tp_ns.ns, tp_ns.tp, partitions, 1)};
@@ -271,6 +285,16 @@ public:
           .create_topics(std::move(cfgs), model::no_timeout)
           .then([this](std::vector<cluster::topic_result> results) {
               return wait_for_topics(std::move(results));
+          });
+    }
+
+    ss::future<> delete_topic(model::topic_namespace tp_ns) {
+        std::vector<model::topic_namespace> tps{{tp_ns}};
+        return app.controller->get_topics_frontend()
+          .local()
+          .delete_topics(std::move(tps), model::no_timeout)
+          .then([this](std::vector<cluster::topic_result> results) {
+              return wait_for_no_topics(std::move(results));
           });
     }
 

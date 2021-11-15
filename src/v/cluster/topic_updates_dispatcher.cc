@@ -35,9 +35,11 @@ topic_updates_dispatcher::apply_update(model::record_batch b) {
                 // delete case - we need state copy to
                 auto tp_md = _topic_table.local().get_topic_metadata(
                   del_cmd.value);
+                bool non_replicable = _topic_table.local().is_non_replicable(
+                  del_cmd.value);
                 return dispatch_updates_to_cores(del_cmd, base_offset)
-                  .then([this, tp_md](std::error_code ec) {
-                      if (ec == errc::success) {
+                  .then([this, tp_md, non_replicable](std::error_code ec) {
+                      if (ec == errc::success && !non_replicable) {
                           vassert(
                             tp_md.has_value(),
                             "Topic had to exist before successful delete");
@@ -143,6 +145,7 @@ topic_updates_dispatcher::dispatch_updates_to_cores(Cmd cmd, model::offset o) {
       });
 }
 
+/// TODO: BUG HERE FOR MATERIIALIXED TOPICS
 void topic_updates_dispatcher::deallocate_topic(
   const model::topic_metadata& tp_md) {
     // we have to deallocate topics

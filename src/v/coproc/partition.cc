@@ -87,6 +87,7 @@ partition::make_reader(storage::log_reader_config config) {
 
 safe_shutdown_appender
 partition::make_appender(storage::log_append_config write_cfg) {
+    _gate.check();
     auto appender = _log.make_appender(write_cfg);
     return safe_shutdown_appender(_gate, std::move(appender));
 }

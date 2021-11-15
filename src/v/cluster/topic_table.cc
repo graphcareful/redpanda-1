@@ -119,6 +119,7 @@ topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
               found->second.erase(cmd.value) > 0,
               "non_replicable_topic should exist in hierarchy: {}",
               tp_nsv);
+            vlog(clusterlog.info, "DELETE TOPIC: {}", cmd.key);
         } else {
             /// Prevent deletion of source topics that have non_replicable
             /// topics. To delete this topic all of its non_replicable descedent

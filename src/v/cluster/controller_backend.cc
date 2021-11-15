@@ -436,7 +436,9 @@ ss::future<> controller_backend::reconcile_ntp(deltas_t& deltas) {
                 stop = true;
                 continue;
             }
-            vlog(clusterlog.info, "partition operation {} finished", *it);
+            if (!it->is_non_replicable()) {
+                vlog(clusterlog.info, "partition operation {} finished", *it);
+            }
         } catch (...) {
             vlog(
               clusterlog.error,

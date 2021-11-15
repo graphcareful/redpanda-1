@@ -154,6 +154,11 @@ public:
 
     bool is_update_in_progress(const model::ntp&) const;
 
+    bool is_non_replicable(model::topic_namespace_view tp) const {
+        auto found = _topics.find(tp);
+        return (found != _topics.end()) && !found->second.is_topic_replicable();
+    }
+
 private:
     struct waiter {
         explicit waiter(uint64_t id)
