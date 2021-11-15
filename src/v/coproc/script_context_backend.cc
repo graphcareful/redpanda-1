@@ -15,6 +15,8 @@
 #include "cluster/non_replicable_topics_frontend.h"
 #include "coproc/exception.h"
 #include "coproc/logger.h"
+#include "coproc/partition.h"
+#include "coproc/partition_manager.h"
 #include "coproc/reference_window_consumer.hpp"
 #include "storage/parser_utils.h"
 #include "vlog.h"
@@ -27,6 +29,10 @@ class follower_create_topic_exception final : public exception {
 };
 
 class log_not_yet_created_exception final : public exception {
+    using exception::exception;
+};
+
+class log_closed_exception final : public exception {
     using exception::exception;
 };
 
@@ -65,7 +71,7 @@ private:
 };
 
 static ss::future<> do_write_materialized_partition(
-  storage::log log, model::record_batch_reader reader) {
+  ss::lw_shared_ptr<partition> p, model::record_batch_reader reader) {
     /// Re-write all batch term_ids to 1, otherwise they will carry the
     /// term ids of records coming from parent batches
     auto [crc_success, header_complete, batch_w_correct_terms]
@@ -91,16 +97,16 @@ static ss::future<> do_write_materialized_partition(
       .timeout = model::no_timeout};
     /// Finally, write the batch
     co_await std::move(compressed)
-      .for_each_ref(log.make_appender(write_cfg), model::no_timeout)
+      .for_each_ref(p->make_appender(write_cfg), model::no_timeout)
       .discard_result();
 }
 
-static ss::future<storage::log>
-get_log(storage::log_manager& log_mgr, const model::ntp& ntp) {
-    auto found = log_mgr.get(ntp);
+static ss::future<ss::lw_shared_ptr<partition>>
+get_partition(partition_manager& pm, const model::ntp& ntp) {
+    auto found = pm.get(ntp);
     if (found) {
         /// Log exists, do nothing and return it
-        co_return *found;
+        co_return found;
     }
     /// In the case the storage::log has not been created, but the topic has.
     /// Retry again.
@@ -175,11 +181,20 @@ static ss::future<> write_materialized_partition(
           model::topic_namespace new_materialized(ntp.ns, ntp.tp.topic);
           return maybe_make_materialized_log(
                    source, new_materialized, ctx->partition->is_leader(), args)
-            .then([args, ntp] {
-                return get_log(args.storage.local().log_mgr(), ntp);
-            })
-            .then([ntp, reader = std::move(reader)](storage::log log) mutable {
-                return do_write_materialized_partition(log, std::move(reader));
+            .then([args, ntp] { return get_partition(args.pm.local(), ntp); })
+            .then([ntp, args, reader = std::move(reader)](
+                    ss::lw_shared_ptr<partition> p) mutable {
+                return do_write_materialized_partition(p, std::move(reader))
+                  .handle_exception_type([id = args.id, ntp](
+                                           const ss::gate_closed_exception&) {
+                      vlog(
+                        coproclog.info,
+                        "Materialized Log {} closed while writing",
+                        ntp);
+                      return ss::make_exception_future<>(
+                        log_closed_exception(ssx::sformat(
+                          "Log {} closed while writing, copro: {} ", ntp, id)));
+                  });
             });
       });
 }
@@ -229,14 +244,11 @@ process_one_reply(process_batch_reply::data e, output_write_args args) {
           "Failed to create materialized topic: {}",
           ex.what());
         co_return;
-    } catch (const follower_create_topic_exception& ex) {
+    } catch (const coproc::exception& ex) {
         vlog(
           coproclog.debug,
           "Waiting to create materialized topic: {}",
           ex.what());
-        co_return;
-    } catch (const log_not_yet_created_exception& ex) {
-        vlog(coproclog.trace, "Waiting for underlying log: {}", ex.what());
         co_return;
     }
     auto ofound = ntp_ctx->offsets.find(args.id);

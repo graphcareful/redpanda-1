@@ -37,7 +37,8 @@ api::api(
       .mt_frontend = _mt_frontend,
       .topics_frontend = topics_frontend,
       .metadata_cache = metadata_cache,
-      .partition_manager = partition_manager}) {}
+      .partition_manager = partition_manager,
+      .cp_partition_manager = _partition_manager}) {}
 
 api::~api() = default;
 
