@@ -1,0 +1,84 @@
+# Copyright 2021 Vectorized, Inc.
+#
+# Use of this software is governed by the Business Source License
+# included in the file licenses/BSL.md
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0
+
+from kafka import TopicPartition
+from ducktape.mark.resource import cluster
+from rptest.clients.types import TopicSpec
+from rptest.wasm.wasm_build_tool import WasmTemplateRepository
+from rptest.wasm.wasm_test import WasmTest, WasmScript, random_string
+from rptest.clients.rpk import RpkTool
+from rptest.wasm.topic import construct_materialized_topic
+from rptest.wasm.native_kafka_consumer import NativeKafkaConsumer
+from ducktape.utils.util import wait_until
+
+
+class WasmFilterTest(WasmTest):
+    topics = (TopicSpec(partition_count=3,
+                        replication_factor=3,
+                        cleanup_policy=TopicSpec.CLEANUP_DELETE), )
+
+    def __init__(self, test_context, extra_rp_conf=None):
+        super(WasmFilterTest, self).__init__(test_context,
+                                             extra_rp_conf=extra_rp_conf or {})
+        self._num_records = 32
+        self._expected_record_cnt = (self._num_records / 2)
+        self._output_topic = "default_output"
+        self._script = WasmScript(
+            inputs=[x.name for x in self.topics],
+            outputs=[(self._output_topic, self._expected_record_cnt)],
+            script=WasmTemplateRepository.FILTER_TRANSFORM)
+
+    def push_test_data_to_inputs(self):
+        # Each partition gets self._num_records pushes
+        # Half of the pushes will contain 0 the other half a 1
+        # Filter and assertions can be correctly performed
+        for topic in self.topics:
+            for i in range(0, topic.partition_count):
+                for j in range(0, self._num_records):
+                    self._rpk_tool.produce(topic.name, str(j), str(j), [], partition=i)
+
+    @cluster(num_nodes=3)
+    def verify_filter_test(self):
+        # 1. Fill source topics with test data
+        self.push_test_data_to_inputs()
+
+        # 2. Start coprocessor
+        self._build_script(self._script)
+
+        # 3. Drain from output topics within timeout
+        spec = self.topics[0]
+        materialized_topic = construct_materialized_topic(
+            spec.name, self._output_topic)
+        output_tps = [
+            TopicPartition(materialized_topic, 0),
+            TopicPartition(materialized_topic, 1),
+            TopicPartition(materialized_topic, 2),
+        ]
+        consumer = NativeKafkaConsumer(self.redpanda.brokers(),
+                                       output_tps,
+                                       self._expected_record_cnt)
+
+        # Wait until materialized topic is up
+        def topic_created():
+            topics = self._rpk_tool.list_topics()
+            return materialized_topic in topics
+
+        wait_until(topic_created, timeout_sec=10, backoff_sec=1)
+
+        # Consume from materialized topic
+        def finished():
+            self.logger.info("Recs read: %s" % consumer.results.num_records())
+            return consumer.is_finished()
+
+        consumer.start()
+        wait_until(finished, timeout_sec=10, backoff_sec=1)
+        consumer.join()
+
+        # Assert success
+        assert (consumer.results.num_records() == self._expected_record_cnt)
