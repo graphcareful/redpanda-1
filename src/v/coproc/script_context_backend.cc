@@ -22,10 +22,6 @@
 #include <seastar/core/coroutine.hh>
 
 namespace coproc {
-class crc_failed_exception final : public exception {
-    using exception::exception;
-};
-
 class follower_create_topic_exception final : public exception {
     using exception::exception;
 };
@@ -52,21 +48,37 @@ private:
     model::record_batch_reader::data_t _batches;
 };
 
+/// Necessary because the javascript project has potential areas where
+/// inconsistent record batches may be built and sent back to rp
+class verify_record_batch_consistency {
+public:
+    ss::future<ss::stop_iteration> operator()(const model::record_batch& b) {
+        _is_consistent &= (b.header().record_count == b.record_count());
+        co_return _is_consistent ? ss::stop_iteration::no
+                                 : ss::stop_iteration::yes;
+    }
+
+    bool end_of_stream() const { return _is_consistent; }
+
+private:
+    bool _is_consistent{true};
+};
+
 static ss::future<> do_write_materialized_partition(
   storage::log log, model::record_batch_reader reader) {
     /// Re-write all batch term_ids to 1, otherwise they will carry the
     /// term ids of records coming from parent batches
-    auto [success, batch_w_correct_terms]
+    auto [crc_success, header_complete, batch_w_correct_terms]
       = co_await std::move(reader).for_each_ref(
         reference_window_consumer(
-          model::record_batch_crc_checker(), set_term_id_to_zero()),
+          model::record_batch_crc_checker(),
+          verify_record_batch_consistency(),
+          set_term_id_to_zero()),
         model::no_timeout);
-    if (!success) {
-        /// In the case crc checks failed, do NOT write records to storage
-        throw crc_failed_exception(fmt::format(
-          "Batch failed crc checks, check wasm engine impl: {}",
-          log.config().ntp()));
-    }
+
+    vassert(crc_success, "Wasm engine failed to compile correct crc check");
+    vassert(header_complete, "Wasm engine returned malformatted batch/header");
+
     /// Compress the data before writing...
     auto compressed = co_await std::move(batch_w_correct_terms)
                         .for_each_ref(
@@ -211,12 +223,6 @@ process_one_reply(process_batch_reply::data e, output_write_args args) {
     try {
         co_await write_materialized_partition(
           e.ntp, std::move(*e.reader), ntp_ctx, args);
-    } catch (const crc_failed_exception& ex) {
-        vlog(
-          coproclog.error,
-          "Reprocessing record, failure encountered, {}",
-          ex.what());
-        co_return;
     } catch (const cluster::non_replicable_topic_creation_exception& ex) {
         vlog(
           coproclog.error,
