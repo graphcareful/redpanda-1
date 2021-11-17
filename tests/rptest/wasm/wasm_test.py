@@ -67,6 +67,7 @@ class WasmTest(RedpandaTest):
 
         wasm_opts = enable_wasm_options()
         wasm_opts.update(extra_rp_conf)
+        wasm_opts['auto_create_topics_enabled'] = False
         super(WasmTest, self).__init__(test_context,
                                        extra_rp_conf=wasm_opts,
                                        num_brokers=num_brokers)
