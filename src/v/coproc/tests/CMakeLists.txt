@@ -17,17 +17,17 @@ rp_test(
   BINARY_NAME coproc_fixture
   SOURCES
     ${fixture_srcs}
-    retry_logic_tests.cc
-    partition_tests.cc
+    # retry_logic_tests.cc
+    # partition_tests.cc
     topic_ingestion_policy_tests.cc
-    failure_recovery_tests.cc
-    pacemaker_tests.cc
-    coproc_bench_tests.cc
-    offset_storage_utils_tests.cc
-    wasm_event_tests.cc
-    event_handler_tests.cc
-    event_listener_tests.cc
-    kafka_api_materialized_tests.cc
+    # failure_recovery_tests.cc
+    # pacemaker_tests.cc
+    # coproc_bench_tests.cc
+    # offset_storage_utils_tests.cc
+    # wasm_event_tests.cc
+    # event_handler_tests.cc
+    # event_listener_tests.cc
+    # kafka_api_materialized_tests.cc
   DEFINITIONS BOOST_TEST_DYN_LINK
   LIBRARIES v::seastar_testing_main ${fixture_deps}
   LABELS coproc

@@ -56,15 +56,15 @@ public:
     }
 };
 
-FIXTURE_TEST(test_copro_tip_latest, tip_fixture) {
-    auto results = run(tp_latest, 400, 400);
-    BOOST_CHECK_EQUAL(400, results);
-}
+// FIXTURE_TEST(test_copro_tip_latest, tip_fixture) {
+//     auto results = run(tp_latest, 400, 400);
+//     BOOST_CHECK_EQUAL(400, results);
+// }
 
-FIXTURE_TEST(test_copro_tip_earliest, tip_fixture) {
-    auto results = run(tp_earliest, 400, 800);
-    BOOST_CHECK_EQUAL(800, results);
-}
+// FIXTURE_TEST(test_copro_tip_earliest, tip_fixture) {
+//     auto results = run(tp_earliest, 400, 800);
+//     BOOST_CHECK_EQUAL(800, results);
+// }
 
 FIXTURE_TEST(test_copro_tip_stored, coproc_test_fixture) {
     model::topic sttp("sttp");
