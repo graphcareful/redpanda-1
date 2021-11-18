@@ -56,7 +56,7 @@ class WasmBuildTool():
         inputs = ",".join([
             f'["{topic}", PolicyInjection.Stored]' for topic in script.inputs
         ])
-        outputs = [topic for topic in script.outputs]
+        outputs = [e[0] for e in script.outputs]
         if any(x is None for x in outputs):
             raise Exception('Error rendering template, outputs invalid')
         t = jinja2.Template(template)

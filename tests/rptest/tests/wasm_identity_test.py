@@ -53,10 +53,16 @@ class WasmIdentityTest(WasmTest):
         List of scripts to deploy, built from the results of wasm_test_outputs().
         By default inputs to all scripts will be self.input_topics()
         """
+        def enrich_output(opts):
+            """
+            For all identity topics the expected output is the same as input
+            """
+            return [(x, self._num_records) for x in opts]
+
         itopics = self.input_topics()
         return [
             WasmScript(inputs=itopics,
-                       outputs=opts,
+                       outputs=enrich_output(opts),
                        script=WasmTemplateRepository.IDENTITY_TRANSFORM)
             for opts in self.wasm_test_outputs()
         ]

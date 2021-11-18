@@ -134,21 +134,20 @@ class WasmTest(RedpandaTest):
         input_tps = expand_topic_spec([x[0] for x in topic_spec])
         output_tps = expand_topic_spec(
             to_output_topic_spec(
-                flat_map(lambda script: script.outputs, scripts)))
+                flat_map(lambda script: [x[0] for x in script.outputs],
+                         scripts)))
 
         # Calcualte expected records on all inputs / outputs
         total_inputs = reduce(lambda acc, x: acc + x[1], topic_spec, 0)
+        total_outputs = sum(
+            [e[1] for e in flat_map(lambda s: s.outputs, scripts)])
 
-        def accrue(acc, output_topic):
-            src = get_source_topic(output_topic)
-            num_records = [x[1] for x in topic_spec if x[0].name == src]
-            assert (len(num_records) == 1)
-            return acc + num_records[0]
-
-        total_outputs = reduce(accrue, set([x.topic for x in output_tps]), 0)
-
-        self.logger.info(f"Input consumer assigned: {input_tps}")
-        self.logger.info(f"Output consumer assigned: {output_tps}")
+        self.logger.info(
+            f"Input consumer assigned: {input_tps}, total expected input: {total_inputs}"
+        )
+        self.logger.info(
+            f"Output consumer assigned: {output_tps}, total expected output: {total_outputs}"
+        )
 
         self._producers = []
 
