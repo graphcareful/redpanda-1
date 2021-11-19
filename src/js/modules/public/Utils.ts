@@ -136,6 +136,36 @@ export const copyRecordBatch = (
   return createRecordBatchFunctor(newBatch);
 };
 
+export const copyRecordBatch = (recordBatch: RecordBatch): RecordBatch => {
+  const deepCopiedRecords = recordBatch.records.map((record) => {
+    const deepCopiedRecordHeaders = record.headers.map(header => {
+      const newKey = Buffer.alloc(header.headerKey.length);
+      const newVal = Buffer.alloc(header.value.length);
+      header.headerKey.copy(newKey);
+      header.value.copy(newVal);
+      return {
+        ...header,
+        headerKey: newKey,
+        value: newVal
+      }
+    });
+    const newKey = Buffer.alloc(record.key.length);
+    const newVal = Buffer.alloc(record.value.length);
+    record.key.copy(newKey);
+    record.value.copy(newVal);
+    return {
+      ...record,
+      key: newKey,
+      value: newVal,
+      headers: deepCopiedRecordHeaders,
+    };
+  });
+  return {
+    header: recordBatch.header,
+    records: deepCopiedRecords,
+  };
+};
+
 // receive int64 and return Uint64
 const encodeZigzag = (field: bigint): bigint => {
   // Create Bigint with 64 bytes length and sign 63
