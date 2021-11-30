@@ -18,9 +18,49 @@
 #include "coproc/logger.h"
 #include "coproc/pacemaker.h"
 #include "coproc/partition_manager.h"
+#include "coproc/script_database.h"
 #include "storage/api.h"
 
 #include <seastar/core/coroutine.hh>
+
+namespace {
+
+std::vector<model::ntp> get_materialized_partitions(
+  const cluster::topic_table& topics, const model::ntp& ntp) {
+    std::vector<model::ntp> ntps;
+    auto ps = topics.get_partition_assignment(ntp);
+    if (ps) {
+        auto found = topics.hierarchy_map().find(
+          model::topic_namespace_view{ntp});
+        if (found != topics.hierarchy_map().end()) {
+            for (const auto& c : found->second) {
+                ntps.emplace_back(c.ns, c.tp, ps->id);
+            }
+        }
+    }
+    return ntps;
+}
+
+using id_policy_map = absl::
+  flat_hash_map<coproc::script_id, std::vector<coproc::topic_namespace_policy>>;
+id_policy_map grab_metadata(
+  coproc::wasm::script_database& sdb, model::topic_namespace_view tn_view) {
+    id_policy_map results;
+    auto found = sdb.find(tn_view);
+    auto& ids = found->second;
+    for (auto id : ids) {
+        auto policies = sdb.find(id)->second.inputs;
+        for (auto& tnp : policies) {
+            /// Modify topic policy to be earliest, since log must be
+            /// re-processed
+            tnp.policy = coproc::topic_ingestion_policy::earliest;
+        }
+        results.emplace(id, std::move(policies));
+    }
+    return results;
+}
+
+} // namespace
 
 namespace coproc {
 
@@ -29,14 +69,16 @@ reconciliation_backend::reconciliation_backend(
   ss::sharded<cluster::shard_table>& shard_table,
   ss::sharded<cluster::partition_manager>& cluster_pm,
   ss::sharded<partition_manager>& coproc_pm,
-  ss::sharded<pacemaker>& pacemaker) noexcept
+  ss::sharded<pacemaker>& pacemaker,
+  ss::sharded<wasm::script_database>& sdb) noexcept
   : _self(model::node_id(config::node().node_id))
   , _data_directory(config::node().data_directory().as_sstring())
   , _topics(topics)
   , _shard_table(shard_table)
   , _cluster_pm(cluster_pm)
   , _coproc_pm(coproc_pm)
-  , _pacemaker(pacemaker) {
+  , _pacemaker(pacemaker)
+  , _sdb(sdb) {
     _retry_timer.set_callback([this] {
         (void)within_context([this]() { return fetch_and_reconcile(); });
     });
@@ -88,7 +130,9 @@ reconciliation_backend::process_events_for_ntp(
         vlog(coproclog.trace, "executing ntp: {} op: {}", d.ntp, d);
         auto err = co_await process_update(d);
         vlog(coproclog.info, "partition operation {} result {}", d, err);
-        if (err == errc::partition_not_exists) {
+        if (
+          d.type == update_t::op_type::add_non_replicable
+          && err == errc::partition_not_exists) {
             /// In this case the source topic exists but its
             /// associated partition doesn't, so try again
             retries.push_back(std::move(d));
@@ -126,21 +170,27 @@ ss::future<std::error_code>
 reconciliation_backend::process_update(update_t delta) {
     using op_t = update_t::op_type;
     model::revision_id rev(delta.offset());
+    const auto& replicas = delta.type == op_t::update
+                             ? delta.previous_assignment->replicas
+                             : delta.new_assignment.replicas;
+    if (!cluster::has_local_replicas(_self, replicas)) {
+        /// For the 'update' op type, perform this check against the new
+        /// replica list
+        return ss::make_ready_future<std::error_code>(errc::success);
+    }
+
     switch (delta.type) {
     case op_t::add_non_replicable:
-        if (!cluster::has_local_replicas(
-              _self, delta.new_assignment.replicas)) {
-            return ss::make_ready_future<std::error_code>(errc::success);
-        }
         return create_non_replicable_partition(delta.ntp, rev);
     case op_t::del_non_replicable:
-        return delete_non_replicable_partition(delta.ntp, rev).then([] {
-            return std::error_code(errc::success);
-        });
+        return delete_non_replicable_partition(delta.ntp, rev);
+    case op_t::update:
+        return process_shutdown(
+          delta.ntp, rev, std::move(delta.new_assignment.replicas));
+    case op_t::update_finished:
+        return process_restart(delta.ntp, rev);
     case op_t::add:
     case op_t::del:
-    case op_t::update:
-    case op_t::update_finished:
     case op_t::update_properties:
         /// All other case statements are no-ops because those events are
         /// expected to be handled in cluster::controller_backend. Convsersely
@@ -151,7 +201,99 @@ reconciliation_backend::process_update(update_t delta) {
     __builtin_unreachable();
 }
 
-ss::future<> reconciliation_backend::delete_non_replicable_partition(
+ss::future<std::error_code> reconciliation_backend::process_shutdown(
+  model::ntp ntp,
+  model::revision_id rev,
+  std::vector<model::broker_shard> new_replicas) {
+    vlog(coproclog.info, "Processing shutdown of: {}", ntp);
+
+    auto ntps = get_materialized_partitions(_topics.local(), ntp);
+    if (ntps.empty()) {
+        /// Input doesn't exist on this broker/shard
+        co_return make_error_code(errc::partition_not_exists);
+    }
+
+    auto rctxs = co_await _pacemaker.local().shutdown_partition(ntp);
+    if (rctxs.empty()) {
+        /// No coprocessors were processing on the shutdown input
+        co_return make_error_code(errc::partition_not_exists);
+    }
+
+    /// Remove from shard table so ntp is effectively deregistered
+    co_await _shard_table.invoke_on_all([ntps, rev](cluster::shard_table& st) {
+        for (const auto& ntp : ntps) {
+            st.erase(ntp, rev);
+        }
+    });
+
+    /// Finally remove log from disk
+    for (const auto& ntp : ntps) {
+        co_await _coproc_pm.local().remove(ntp);
+        vlog(coproclog.info, "Materialized log {} removed", ntp);
+    }
+
+    co_return make_error_code(errc::success);
+}
+
+ss::future<std::error_code> reconciliation_backend::process_restart(
+  model::ntp ntp, model::revision_id rev) {
+    vlog(coproclog.info, "Processing restart of: {}", ntp);
+
+    auto ntps = get_materialized_partitions(_topics.local(), ntp);
+    if (ntps.empty()) {
+        /// Input doesn't exist on this broker/shard
+        co_return make_error_code(errc::partition_not_exists);
+    }
+
+    for (const auto& ntp : ntps) {
+        vlog(coproclog.info, "Re-creating materialized log: {}", ntp);
+        co_await create_non_replicable_partition(ntp, rev);
+    }
+
+    /// Obtain all matching script_ids for the shutdown partition, they must all
+    /// be restarted
+    auto meta = co_await _sdb.invoke_on(
+      wasm::script_database_main_shard, [ntp](wasm::script_database& sdb) {
+          return grab_metadata(sdb, model::topic_namespace_view{ntp});
+      });
+    if (meta.empty()) {
+        vlog(
+          coproclog.warn,
+          "Move for topic {} triggered restart for corresponding coprocessors "
+          "for which none are detected for on this node. Most likley this is "
+          "due to this node not having yet consumed all coprocessors from "
+          "internal coprocessor topic.",
+          ntp);
+        /// TODO: However it should start from offset 0
+        /// Return success, as when the coprocessor is eventually read off of
+        /// the coprocessor input topic, it will be deployed normally.
+        co_return make_error_code(errc::success);
+    }
+
+    using prps = pacemaker::restart_partition_state;
+    absl::flat_hash_map<script_id, prps> r;
+    for (auto& [id, policies] : meta) {
+        r.emplace(id, prps{std::move(policies), read_context()});
+    }
+
+    /// Ensure that materialized log creation occurs before this line, as
+    /// restart_partition will start processing and coprocessors would find
+    /// themselves in an odd state (i.e. non_replicated topic exists in topic
+    /// metadata but no associated storage::log exists)
+    auto results = co_await _pacemaker.local().restart_partition(
+      ntp, std::move(r));
+    for (const auto& [id, errc] : results) {
+        vlog(
+          coproclog.info,
+          "Upon restart of '{}' reported status: {}",
+          ntp,
+          errc);
+    }
+    co_return make_error_code(errc::success);
+}
+
+ss::future<std::error_code>
+reconciliation_backend::delete_non_replicable_partition(
   model::ntp ntp, model::revision_id rev) {
     vlog(coproclog.trace, "removing {} from shard table at {}", ntp, rev);
     co_await _shard_table.invoke_on_all(
@@ -163,6 +305,7 @@ ss::future<> reconciliation_backend::delete_non_replicable_partition(
               return _coproc_pm.local().remove(ntp);
           });
     }
+    co_return make_error_code(errc::success);
 }
 
 ss::future<std::error_code>
