@@ -13,6 +13,8 @@
 #include "cluster/fwd.h"
 #include "cluster/topic_table.h"
 #include "coproc/fwd.h"
+#include "coproc/script_context_router.h"
+#include "coproc/types.h"
 #include "storage/fwd.h"
 #include "utils/mutex.h"
 
@@ -25,14 +27,16 @@
 
 namespace coproc {
 
-class reconciliation_backend {
+class reconciliation_backend
+  : public ss::peering_sharded_service<reconciliation_backend> {
 public:
     explicit reconciliation_backend(
       ss::sharded<cluster::topic_table>&,
       ss::sharded<cluster::shard_table>&,
       ss::sharded<cluster::partition_manager>&,
       ss::sharded<partition_manager>&,
-      ss::sharded<pacemaker>&) noexcept;
+      ss::sharded<pacemaker>&,
+      ss::sharded<wasm::script_database>&) noexcept;
 
     /// Starts the reconciliation loop
     ///
@@ -48,9 +52,13 @@ private:
     ss::future<std::vector<update_t>>
       process_events_for_ntp(model::ntp, std::vector<update_t>);
 
+    ss::future<std::error_code> process_shutdown(
+      model::ntp, model::revision_id, std::vector<model::broker_shard>);
+    ss::future<std::error_code> process_restart(model::ntp, model::revision_id);
+
     ss::future<> fetch_and_reconcile();
 
-    ss::future<>
+    ss::future<std::error_code>
     delete_non_replicable_partition(model::ntp ntp, model::revision_id rev);
     ss::future<std::error_code>
     create_non_replicable_partition(model::ntp ntp, model::revision_id rev);
@@ -63,6 +71,15 @@ private:
 private:
     static constexpr auto retry_timeout_interval = std::chrono::milliseconds(
       100);
+
+    /// Store x-core move state here, so logs may be re-opened instead of
+    /// created, saves copro from having to reprocess entire logs from offset 0
+    /// after move
+    struct state_revision {
+        absl::flat_hash_map<script_id, read_context> read_ctxs;
+        model::revision_id r_id{};
+    };
+    absl::node_hash_map<model::ntp, state_revision> _saved_ctxs;
 
     cluster::notification_id_type _id_cb;
     model::node_id _self;
@@ -79,6 +96,7 @@ private:
     ss::sharded<cluster::partition_manager>& _cluster_pm;
     ss::sharded<partition_manager>& _coproc_pm;
     ss::sharded<pacemaker>& _pacemaker;
+    ss::sharded<wasm::script_database>& _sdb;
 };
 
 } // namespace coproc
