@@ -84,6 +84,20 @@ ss::future<> partition_manager::remove(const model::ntp& ntp) {
     co_await _storage.log_mgr().remove(ntp);
 }
 
+ss::future<> partition_manager::shutdown(const model::ntp& ntp) {
+    auto holder = _gate.hold();
+    auto partition = get(ntp);
+
+    if (!partition) {
+        return ss::make_exception_future<>(std::invalid_argument(fmt::format(
+          "Can not shutdown partition. NTP {} is not present in partition "
+          "manager",
+          ntp)));
+    }
+    _ntp_table.erase(ntp);
+    return do_shutdown(partition);
+}
+
 ss::future<>
 partition_manager::do_shutdown(ss::lw_shared_ptr<partition> partition) {
     try {

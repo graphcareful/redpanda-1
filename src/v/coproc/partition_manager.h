@@ -40,6 +40,7 @@ public:
       manage(storage::ntp_config, ss::lw_shared_ptr<cluster::partition>);
 
     ss::future<> remove(const model::ntp&);
+    ss::future<> shutdown(const model::ntp&);
 
     /// Recieve updates when a partition with matching ns, topic is added
     cluster::notification_id_type register_manage_notification(
