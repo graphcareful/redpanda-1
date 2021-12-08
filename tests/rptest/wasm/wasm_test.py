@@ -7,11 +7,7 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
-import os
-import uuid
-import random
-import string
-
+from rptest.wasm.wasm_mixin import WasmMixin
 from kafka import TopicPartition
 
 from rptest.wasm.topic import get_source_topic
@@ -35,29 +31,7 @@ def flat_map(fn, ll):
     return reduce(lambda acc, x: acc + fn(x), ll, [])
 
 
-def random_string(N):
-    return ''.join(
-        random.choice(string.ascii_uppercase + string.digits)
-        for _ in range(N))
-
-
-class WasmScript:
-    def __init__(self, inputs=[], outputs=[], script=None):
-        self.name = random_string(10)
-        self.inputs = inputs
-        self.outputs = outputs
-        self.script = script
-        self.dir_name = str(uuid.uuid4())
-
-    def get_artifact(self, build_dir):
-        artifact = os.path.join(build_dir, self.dir_name, "dist",
-                                f"{self.dir_name}.js")
-        if not os.path.exists(artifact):
-            raise Exception(f"Artifact {artifact} was not built")
-        return artifact
-
-
-class WasmTest(RedpandaTest):
+class WasmTest(WasmMixin):
     def __init__(self, test_context, extra_rp_conf=dict(), num_brokers=3):
         def enable_wasm_options():
             return dict(
@@ -70,26 +44,9 @@ class WasmTest(RedpandaTest):
         super(WasmTest, self).__init__(test_context,
                                        extra_rp_conf=wasm_opts,
                                        num_brokers=num_brokers)
-        self._rpk_tool = RpkTool(self.redpanda)
-        self._build_tool = WasmBuildTool(self._rpk_tool)
         self._input_consumer = None
         self._output_consumer = None
         self._producers = None
-
-    def _build_script(self, script):
-        # Build the script itself
-        self._build_tool.build_test_artifacts(script)
-
-        # Deploy coprocessor
-        self._rpk_tool.wasm_deploy(
-            script.get_artifact(self._build_tool.work_dir), script.name,
-            "ducktape")
-
-    def restart_wasm_engine(self, node):
-        self.logger.info(
-            f"Begin manually triggered restart of wasm engine on node {node}")
-        node.account.kill_process("bin/node", clean_shutdown=False)
-        self.redpanda.start_wasm_engine(node)
 
     def restart_redpanda(self, node):
         self.logger.info(
