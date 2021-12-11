@@ -95,6 +95,10 @@ public:
             false));
     }
 
+    fixture_ptr::pointer get_node_fixture(model::node_id id) {
+        return _instances[id].get();
+    }
+
     application* get_node_application(model::node_id id) {
         return &_instances[id]->app;
     }
