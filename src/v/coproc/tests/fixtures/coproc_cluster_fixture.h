@@ -25,11 +25,14 @@ class coproc_cluster_fixture
 public:
     using wasm_ptr = std::unique_ptr<supervisor_test_fixture>;
 
-    coproc_cluster_fixture() noexcept
+    coproc_cluster_fixture()
       : cluster_test_fixture()
       , coproc_api_fixture() {
+        set_configuration("disable_metrics", true);
         set_configuration("enable_coproc", true);
     }
+
+    ~coproc_cluster_fixture() override {}
 
     ss::future<> enable_coprocessors(std::vector<deploy> copros) {
         std::vector<coproc::script_id> ids;
@@ -59,6 +62,11 @@ public:
       int proxy_port = 8082,
       int schema_reg_port = 8081,
       int coproc_supervisor_port = 43189) {
+        _instances.emplace(
+          node_id,
+          std::make_unique<supervisor_test_fixture>(
+            coproc_supervisor_port + node_id()));
+
         application* app = cluster_test_fixture::create_node_application(
           node_id,
           kafka_port,
@@ -66,10 +74,6 @@ public:
           proxy_port,
           schema_reg_port,
           coproc_supervisor_port);
-        _instances.emplace(
-          node_id,
-          std::make_unique<supervisor_test_fixture>(
-            coproc_supervisor_port + node_id()));
         return app;
     }
 
@@ -84,5 +88,5 @@ public:
     }
 
 private:
-    absl::flat_hash_map<model::node_id, wasm_ptr> _instances;
+    absl::node_hash_map<model::node_id, wasm_ptr> _instances;
 };

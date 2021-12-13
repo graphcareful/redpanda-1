@@ -210,6 +210,7 @@ ss::future<enable_copros_reply::data> supervisor::launch(
 
 ss::future<enable_copros_reply> supervisor::enable_coprocessors(
   enable_copros_request&& r, rpc::streaming_context&) {
+    vlog(coproc::coproclog.info, "enable");
     return ss::with_scheduling_group(
       get_scheduling_group(), [this, r = std::move(r)]() mutable {
           return ss::do_with(
@@ -246,6 +247,7 @@ supervisor::disable_coprocessor(script_id id) {
 
 ss::future<disable_copros_reply> supervisor::disable_coprocessors(
   disable_copros_request&& r, rpc::streaming_context&) {
+    vlog(coproc::coproclog.info, "disbale");
     return ss::with_scheduling_group(
       get_scheduling_group(), [this, r = std::move(r)]() mutable {
           return ss::do_with(
@@ -264,6 +266,7 @@ ss::future<disable_copros_reply> supervisor::disable_coprocessors(
 
 ss::future<disable_copros_reply>
 supervisor::disable_all_coprocessors(empty_request&&, rpc::streaming_context&) {
+    vlog(coproc::coproclog.info, "disbale all");
     return ss::with_scheduling_group(get_scheduling_group(), [this] {
         return registered_scripts().then(
           [this](absl::node_hash_set<script_id> ids) {
@@ -284,6 +287,7 @@ supervisor::disable_all_coprocessors(empty_request&&, rpc::streaming_context&) {
 
 ss::future<process_batch_reply>
 supervisor::process_batch(process_batch_request&& r, rpc::streaming_context&) {
+    vlog(coproc::coproclog.info, "Process batch");
     return ss::with_scheduling_group(
       get_scheduling_group(), [this, r = std::move(r)]() mutable {
           vassert(!r.reqs.empty(), "Cannot expect empty request from redpanda");
@@ -318,6 +322,7 @@ ss::future<absl::node_hash_set<script_id>> supervisor::registered_scripts() {
 
 ss::future<state_size_t>
 supervisor::heartbeat(empty_request&&, rpc::streaming_context&) {
+    vlog(coproc::coproclog.info, "HEARTBEAT");
     if (!*_delay_heartbeat.local()) {
         auto unique_scripts = co_await registered_scripts();
         co_return state_size_t(unique_scripts.size());

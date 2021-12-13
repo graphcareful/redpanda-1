@@ -11,6 +11,7 @@
 
 #pragma once
 #include "config/tls_config.h"
+#include "random/generators.h"
 #include "rpc/dns.h"
 #include "rpc/server.h"
 #include "rpc/service.h"
@@ -97,7 +98,9 @@ public:
     explicit rpc_base_integration_fixture(uint16_t port)
       : _listen_address("127.0.0.1", port)
       , _ssg(ss::create_smp_service_group({5000}).get0()) {
-        _sg = ss::create_scheduling_group("rpc scheduling group", 200).get0();
+        auto suffix = random_generators::gen_alphanum_string(10);
+        _sg = ss::create_scheduling_group("rpc scheduling group" + suffix, 200)
+                .get0();
     }
 
     virtual ~rpc_base_integration_fixture() {
