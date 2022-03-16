@@ -32,6 +32,7 @@
 #include <seastar/util/log.hh>
 
 #include <memory>
+#include <type_traits>
 
 namespace kafka {
 
@@ -72,6 +73,11 @@ struct throttle_delay {
     bool partition_quota_exceeded() const {
         return duration > 0ms && delay_type == type::partition_rate_exceeded;
     }
+};
+
+template<typename T>
+concept has_throttle_time_ms = requires(T a) {
+    {a.data.throttle_time_ms};
 };
 
 class request_context {
@@ -138,10 +144,9 @@ public:
         return _conn->server().tx_gateway_frontend();
     }
 
-    int32_t throttle_delay_ms() const {
+    std::chrono::milliseconds throttle_delay_ms() const {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
-                 _throttle_delay.duration)
-          .count();
+          _throttle_delay.duration);
     }
 
     const throttle_delay& throttle_delay() const { return _throttle_delay; }
@@ -196,6 +201,14 @@ public:
                 version = api_version(0);
             }
         }
+
+        /// Many responses contain a throttle_time_ms field, to prevent each
+        /// handler from manually having to set this value, it can be done in
+        /// one place here, with this concept check
+        if constexpr (has_throttle_time_ms<ResponseType>) {
+            r.data.throttle_time_ms = throttle_delay_ms();
+        }
+
         auto resp = std::make_unique<response>(is_flexible);
         r.encode(resp->writer(), version);
         return ss::make_ready_future<response_ptr>(std::move(resp));
