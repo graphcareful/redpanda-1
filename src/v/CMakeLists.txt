@@ -32,6 +32,7 @@ add_subdirectory(cloud_storage)
 add_subdirectory(cloud_roles)
 add_subdirectory(v8_engine)
 add_subdirectory(rp_util)
+add_subdirectory(resource_mgmt/tests)
 
 option(ENABLE_GIT_VERSION "Build with Git metadata" OFF)
 if(${ENABLE_GIT_VERSION})
