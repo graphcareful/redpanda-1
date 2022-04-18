@@ -181,7 +181,7 @@ ss::future<> connection_context::handle_auth_v0(const size_t size) {
             .version = version,
           },
           std::move(request_buf),
-          0s);
+          throttle_delay{});
         auto resp = co_await kafka::process_request(
                       std::move(ctx), _proto.smp_group())
                       .response;
@@ -228,7 +228,7 @@ connection_context::throttle_request(
     // applied to subsequent messages allow backpressure to take
     // affect.
     auto delay = _proto.quota_mgr().record_tp_and_throttle(
-      hdr.client_id, request_size);
+      hdr.client_id, track_partition_mutations(hdr.key), request_size);
     auto tracker = std::make_unique<request_tracker>(_rs.probe());
     auto fut = ss::now();
     if (!delay.first_violation) {
@@ -249,6 +249,8 @@ connection_context::throttle_request(
               ss::semaphore_units<> qd_units) mutable {
                 session_resources r{
                   .backpressure_delay = delay.duration,
+                  .delay_partition_quota_exceeded
+                  = delay.partition_quota_exceeded,
                   .memlocks = std::move(mem_units),
                   .queue_units = std::move(qd_units),
                   .tracker = std::move(tracker),
@@ -298,7 +300,12 @@ connection_context::dispatch_method_once(request_header hdr, size_t size) {
               }
               auto self = shared_from_this();
               auto rctx = request_context(
-                self, std::move(hdr), std::move(buf), sres.backpressure_delay);
+                self,
+                std::move(hdr),
+                std::move(buf),
+                throttle_delay(
+                  sres.delay_partition_quota_exceeded,
+                  sres.backpressure_delay));
               /*
                * we process requests in order since all subsequent requests
                * are dependent on authentication having completed.

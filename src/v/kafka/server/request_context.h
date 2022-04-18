@@ -56,17 +56,35 @@ struct request_header {
     friend std::ostream& operator<<(std::ostream&, const request_header&);
 };
 
+struct throttle_delay {
+    enum class type { byte_rate_exceeded, partition_rate_exceeded };
+    type delay_type{type::byte_rate_exceeded};
+    ss::lowres_clock::duration duration{0ms};
+
+    throttle_delay() = default;
+
+    throttle_delay(bool partition_mutation_delay, ss::lowres_clock::duration d)
+      : delay_type(
+        partition_mutation_delay ? type::partition_rate_exceeded
+                                 : type::byte_rate_exceeded)
+      , duration(d) {}
+
+    bool partition_quota_exceeded() const {
+        return duration > 0ms && delay_type == type::partition_rate_exceeded;
+    }
+};
+
 class request_context {
 public:
     request_context(
       ss::lw_shared_ptr<connection_context> conn,
       request_header&& header,
       iobuf&& request,
-      ss::lowres_clock::duration throttle_delay) noexcept
+      throttle_delay delay) noexcept
       : _conn(std::move(conn))
       , _header(std::move(header))
       , _reader(std::move(request))
-      , _throttle_delay(throttle_delay) {}
+      , _throttle_delay(delay) {}
 
     request_context(const request_context&) = delete;
     request_context& operator=(const request_context&) = delete;
@@ -120,9 +138,11 @@ public:
 
     int32_t throttle_delay_ms() const {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
-                 _throttle_delay)
+                 _throttle_delay.duration)
           .count();
     }
+
+    const throttle_delay& throttle_delay() const { return _throttle_delay; }
 
     kafka::group_router& groups() { return _conn->server().group_router(); }
 
@@ -215,12 +235,13 @@ private:
     ss::lw_shared_ptr<connection_context> _conn;
     request_header _header;
     request_reader _reader;
-    ss::lowres_clock::duration _throttle_delay;
+    struct throttle_delay _throttle_delay;
 };
 
 // Executes the API call identified by the specified request_context.
 process_result_stages process_request(request_context&&, ss::smp_service_group);
 
 bool track_latency(api_key);
+bool track_partition_mutations(api_key key);
 
 } // namespace kafka

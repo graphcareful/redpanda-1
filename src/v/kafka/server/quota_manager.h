@@ -50,6 +50,7 @@ public:
 
     struct throttle_delay {
         bool first_violation;
+        bool partition_quota_exceeded;
         clock::duration duration;
     };
 
@@ -59,6 +60,8 @@ public:
       , _default_window_width(
           config::shard_local_cfg().default_window_sec.bind())
       , _target_tp_rate(config::shard_local_cfg().target_quota_byte_rate.bind())
+      , _target_partition_mutation_quota(
+          config::shard_local_cfg().partition_mutation_rate.bind())
       , _gc_freq(config::shard_local_cfg().quota_manager_gc_sec())
       , _max_delay(
           config::shard_local_cfg().max_kafka_throttle_delay_ms.bind()) {
@@ -83,28 +86,44 @@ public:
     throttle_delay record_tp_and_throttle(
       std::optional<std::string_view> client_id,
       uint64_t bytes,
+      bool partition_mutation_request,
       clock::time_point now = clock::now());
+
+    // record new desired number of partition mutations
+    void record_partition_mutations(
+      std::optional<std::string_view> client_id,
+      uint32_t mutations,
+      clock::time_point now = clock::now());
+
+private:
+    // last_seen: used for gc keepalive
+    // delay: last calculated delay
+    // tp_rate: throughput tracking
+    // pm_rate: partition mutation quota tracking
+    struct quota {
+        clock::time_point last_seen;
+        clock::duration delay;
+        rate_tracker tp_rate;
+        token_bucket_rate_tracker pm_rate;
+    };
+    using underlying_t = absl::flat_hash_map<ss::sstring, quota>;
 
 private:
     // erase inactive tracked quotas. windows are considered inactive if they
     // have not received any updates in ten window's worth of time.
     void gc(clock::duration full_window);
 
-private:
-    // last_seen: used for gc keepalive
-    // delay: last calculated delay
-    // tp_rate: throughput tracking
-    struct quota {
-        clock::time_point last_seen;
-        clock::duration delay;
-        rate_tracker tp_rate;
-    };
+    underlying_t::iterator maybe_add_and_retrieve_quota(
+      const std::optional<std::string_view>&, const clock::time_point&);
 
+private:
     config::binding<int16_t> _default_num_windows;
     config::binding<std::chrono::milliseconds> _default_window_width;
 
     config::binding<uint32_t> _target_tp_rate;
-    absl::flat_hash_map<ss::sstring, quota> _quotas;
+    config::binding<std::optional<uint32_t>> _target_partition_mutation_quota;
+
+    underlying_t _quotas;
 
     ss::timer<> _gc_timer;
     clock::duration _gc_freq;

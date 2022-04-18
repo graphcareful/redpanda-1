@@ -89,7 +89,7 @@ get_request_context(kafka::protocol& proto, ss::input_stream<char>&& input) {
                             conn,
                             std::move(header),
                             std::move(buf),
-                            std::chrono::milliseconds(0));
+                            kafka::throttle_delay{});
                       });
                 });
           });

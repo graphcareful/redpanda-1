@@ -255,6 +255,19 @@ bool track_latency(api_key key) {
     }
 }
 
+// only track partition mutation quotas for create/delete topics & create
+// partitions requests
+bool track_partition_mutations(api_key key) {
+    switch (key) {
+    case create_topics_handler::api::key:
+    case delete_topics_handler::api::key:
+    case create_partitions_handler::api::key:
+        return true;
+    default:
+        return false;
+    }
+}
+
 process_result_stages
 process_request(request_context&& ctx, ss::smp_service_group g) {
     /*

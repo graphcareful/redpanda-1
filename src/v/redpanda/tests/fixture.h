@@ -416,7 +416,7 @@ public:
 
         kafka::request_header header;
         auto encoder_context = kafka::request_context(
-          conn, std::move(header), iobuf(), std::chrono::milliseconds(0));
+          conn, std::move(header), iobuf(), kafka::throttle_delay{});
 
         iobuf buf;
         kafka::fetch_request request;
@@ -426,10 +426,7 @@ public:
         request.encode(writer, encoder_context.header().version);
 
         return kafka::request_context(
-          conn,
-          std::move(header),
-          std::move(buf),
-          std::chrono::milliseconds(0));
+          conn, std::move(header), std::move(buf), kafka::throttle_delay{});
     }
 
     application app;
