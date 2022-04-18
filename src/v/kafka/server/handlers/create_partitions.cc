@@ -1,4 +1,3 @@
-
 // Copyright 2020 Redpanda Data, Inc.
 //
 // Use of this software is governed by the Business Source License
@@ -18,6 +17,7 @@
 #include "kafka/protocol/schemata/create_partitions_response.h"
 #include "kafka/server/errors.h"
 #include "kafka/server/fwd.h"
+#include "kafka/server/quota_manager.h"
 #include "model/metadata.h"
 #include "model/namespace.h"
 #include "model/timeout_clock.h"
@@ -205,6 +205,23 @@ ss::future<response_ptr> create_partitions_handler::handle(
           });
         co_return co_await ctx.respond(std::move(resp));
     }
+
+    /// Update partition mutation quota
+    const auto mutations = std::accumulate(
+      request.data.topics.begin(),
+      valid_range_end,
+      std::size_t{0},
+      [&ctx](std::size_t acc, const kafka::create_partitions_topic& t) {
+          const auto cfg = ctx.metadata_cache().get_topic_cfg(
+            model::topic_namespace_view(model::kafka_namespace, t.name));
+          vassert(cfg, "Topic exist check has already occurred");
+          vassert(
+            t.count > cfg->partition_count,
+            "Sanity check for request increase partition count failed");
+          return acc + (t.count - cfg->partition_count);
+      });
+    ctx.quota_mgr().record_partition_mutations(
+      ctx.header().client_id, mutations);
 
     auto results = co_await do_create_partitions(
       ctx,

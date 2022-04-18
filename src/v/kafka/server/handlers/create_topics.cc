@@ -17,6 +17,7 @@
 #include "kafka/protocol/timeout.h"
 #include "kafka/server/handlers/topics/topic_utils.h"
 #include "kafka/server/handlers/topics/types.h"
+#include "kafka/server/quota_manager.h"
 #include "kafka/types.h"
 #include "model/metadata.h"
 #include "security/acl.h"
@@ -210,6 +211,7 @@ ss::future<response_ptr> create_topics_handler::handle(
                 });
               return ctx.respond(std::move(response));
           }
+
           auto to_create = to_cluster_type(begin, valid_range_end);
           /**
            * We always override cleanup policy. i.e. topic cleanup policy will
@@ -224,6 +226,18 @@ ss::future<response_ptr> create_topics_handler::handle(
                         .get_default_cleanup_policy_bitflags();
               }
           }
+
+          /// Record the number of desired partition mutations
+          const auto mutations = std::accumulate(
+            request.data.topics.begin(),
+            request.data.topics.end(),
+            std::size_t{0},
+            [](std::size_t acc, const kafka::creatable_topic& t) {
+                return acc + t.num_partitions;
+            });
+          ctx.quota_mgr().record_partition_mutations(
+            ctx.header().client_id, mutations);
+
           // Create the topics with controller on core 0
           return ctx.topics_frontend()
             .create_topics(
