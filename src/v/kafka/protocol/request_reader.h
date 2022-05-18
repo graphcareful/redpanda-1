@@ -74,6 +74,12 @@ public:
         return {do_read_flex_string(n)};
     }
 
+    uuid read_uuid() {
+        uuid u{};
+        u.set_uuid(_parser);
+        return u;
+    }
+
     bytes read_bytes() { return _parser.read_bytes(read_int32()); }
 
     bytes read_flex_bytes() {

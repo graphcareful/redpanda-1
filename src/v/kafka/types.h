@@ -14,6 +14,7 @@
 #include "model/fundamental.h"
 #include "reflection/adl.h"
 #include "seastarx.h"
+#include "utils/base64.h"
 #include "utils/named_type.h"
 
 #include <seastar/core/sstring.hh>
@@ -90,6 +91,33 @@ using leader_epoch = named_type<int32_t, struct leader_epoch_tag>;
  * specific)
  */
 static constexpr leader_epoch invalid_leader_epoch(-1);
+
+struct uuid {
+    static constexpr auto length = 16;
+
+    template<typename Consumer>
+    void set_uuid(Consumer& c) {
+        c.consume(length, [this](const char* src, size_t max) {
+            std::copy_n(src, max, _uuid.data());
+            return ss::stop_iteration::no;
+        });
+    }
+
+    /// implicit conversions to string_view
+    std::string_view view() const {
+        return std::string_view(
+          reinterpret_cast<const char*>(_uuid.data()), _uuid.size());
+    }
+
+    ss::sstring to_string() const { return base64_to_string(view()); }
+
+    friend std::ostream& operator<<(std::ostream& os, const uuid& u) {
+        return os << u.to_string();
+    }
+
+private:
+    std::array<uint8_t, length> _uuid{};
+};
 
 // TODO Ben: Why is this an undefined reference for pandaproxy when defined in
 // kafka/requests.cc
