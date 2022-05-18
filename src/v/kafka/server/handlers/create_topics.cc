@@ -34,16 +34,16 @@
 namespace kafka {
 
 static constexpr std::array<std::string_view, 10> supported_configs{
-  {"compression.type",
-   "cleanup.policy",
-   "message.timestamp.type",
-   "segment.bytes",
-   "compaction.strategy",
-   "retention.bytes",
-   "retention.ms",
-   "redpanda.remote.recovery",
-   "redpanda.remote.write",
-   "redpanda.remote.read"}};
+  topic_property_compression,
+  topic_property_cleanup_policy,
+  topic_property_timestamp_type,
+  topic_property_segment_size,
+  topic_property_compaction_strategy,
+  topic_property_retention_bytes,
+  topic_property_retention_duration,
+  topic_property_recovery,
+  topic_property_remote_write,
+  topic_property_remote_read};
 
 bool is_supported(std::string_view name) {
     return std::any_of(
