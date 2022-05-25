@@ -67,4 +67,16 @@ inline ss::sstring gen_alphanum_string(size_t n) {
     return s;
 }
 
+template<typename T>
+struct gen {};
+
+template<typename T>
+inline std::vector<T> gen_array(size_t size) {
+    std::vector<T> arr;
+    while (size-- > 0) {
+        arr.push_back(gen<T>::generate());
+    }
+    return arr;
+}
+
 } // namespace random_generators
