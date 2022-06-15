@@ -1138,6 +1138,8 @@ if (!{{ tdef.name }}.empty()) {
 if ({{ tdef.name }} != {{ tdef.default_value() }}) {
     {{ vec }}.push_back({{ tdef.tag() }});
 }
+{%- else %}
+{{ vec }}.push_back({{ tdef.tag() }});
 {%- endif %}
 {%- endmacro %}
 
