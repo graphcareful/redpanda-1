@@ -14,6 +14,6 @@
 
 namespace kafka {
 
-using create_partitions_handler = handler<create_partitions_api, 0, 1>;
+using create_partitions_handler = handler<create_partitions_api, 0, 3>;
 
 }

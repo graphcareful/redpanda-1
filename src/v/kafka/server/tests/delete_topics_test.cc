@@ -104,12 +104,13 @@ public:
     }
 
     // https://github.com/apache/kafka/blob/8e161580b859b2fcd54c59625e232b99f3bb48d0/core/src/test/scala/unit/kafka/server/DeleteTopicsRequestTest.scala#L126
-    void validate_topic_is_deleteted(const model::topic& tp) {
-        kafka::metadata_response resp = get_topic_metadata(tp);
+    void validate_topic_is_deleteted(const std::optional<model::topic>& tp) {
+        BOOST_REQUIRE(tp.has_value());
+        kafka::metadata_response resp = get_topic_metadata(*tp);
         auto it = std::find_if(
           std::cbegin(resp.data.topics),
           std::cend(resp.data.topics),
-          [tp](const kafka::metadata_response::topic& md_tp) {
+          [tp = *tp](const kafka::metadata_response::topic& md_tp) {
               return md_tp.name == tp;
           });
         BOOST_CHECK(it != resp.data.topics.end());
@@ -133,8 +134,9 @@ public:
           resp.data.responses.size(), expected_response.size());
 
         for (const auto& tp_r : resp.data.responses) {
+            BOOST_REQUIRE(tp_r.name.has_value());
             BOOST_REQUIRE_EQUAL(
-              tp_r.error_code, expected_response.find(tp_r.name)->second);
+              tp_r.error_code, expected_response.find(*tp_r.name)->second);
         }
     }
 };

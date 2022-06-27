@@ -14,6 +14,6 @@
 
 namespace kafka {
 
-using delete_topics_handler = handler<delete_topics_api, 0, 3>;
+using delete_topics_handler = handler<delete_topics_api, 0, 5>;
 
 }
