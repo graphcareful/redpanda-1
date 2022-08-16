@@ -36,6 +36,11 @@ using namespace std::chrono_literals;
 
 namespace kafka {
 
+struct foo {
+public:
+    foo() {}
+};
+
 ss::future<> connection_context::process_one_request() {
     return parse_size(_rs.conn->input())
       .then([this](std::optional<size_t> sz) mutable {
