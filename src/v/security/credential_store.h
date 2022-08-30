@@ -56,6 +56,14 @@ public:
         return std::nullopt;
     }
 
+    std::optional<credential_types>
+    get_types(const credential_user& name) const {
+        if (auto it = _credentials.find(name); it != _credentials.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
     bool remove(const credential_user& user) {
         return _credentials.erase(user) > 0;
     }
