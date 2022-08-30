@@ -223,6 +223,10 @@ enum class error_code : int16_t {
     invalid_record = 87,
     // There are unstable offsets that need to be cleared.
     unstable_offset_commit = 88,
+    // A request illegally referred to a resource that does not exist
+    resource_not_found = 91,
+    // A request illegally referred to the same resource twice
+    duplicate_resource = 92,
 };
 
 std::ostream& operator<<(std::ostream&, error_code);
