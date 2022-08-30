@@ -30,6 +30,7 @@ set(handlers_srcs
   server/handlers/delete_groups.cc
   server/handlers/describe_acls.cc
   server/handlers/describe_log_dirs.cc
+  server/handlers/describe_scram_credentials.cc
   server/handlers/create_acls.cc
   server/handlers/delete_acls.cc
   server/handlers/create_partitions.cc

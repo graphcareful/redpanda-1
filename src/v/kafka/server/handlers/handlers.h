@@ -24,6 +24,7 @@
 #include "kafka/server/handlers/describe_configs.h"
 #include "kafka/server/handlers/describe_groups.h"
 #include "kafka/server/handlers/describe_log_dirs.h"
+#include "kafka/server/handlers/describe_scram_credentials.h"
 #include "kafka/server/handlers/end_txn.h"
 #include "kafka/server/handlers/fetch.h"
 #include "kafka/server/handlers/find_coordinator.h"
@@ -85,6 +86,7 @@ using request_types = make_request_types<
   txn_offset_commit_handler,
   add_offsets_to_txn_handler,
   end_txn_handler,
+  describe_user_scram_credentials_topics_handler,
   create_partitions_handler,
   offset_for_leader_epoch_handler>;
 
