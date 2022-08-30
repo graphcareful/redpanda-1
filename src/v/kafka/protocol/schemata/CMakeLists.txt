@@ -3,6 +3,8 @@ find_program(KAFKA_CODEGEN_VENV "kafka-codegen-venv")
 set(schemata
   api_versions_request.json
   api_versions_response.json
+  alter_user_scram_credentials_request.json
+  alter_user_scram_credentials_response.json
   offset_fetch_request.json
   offset_fetch_response.json
   offset_commit_request.json

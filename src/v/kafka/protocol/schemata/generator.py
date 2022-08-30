@@ -449,6 +449,9 @@ STRUCT_TYPES = [
     "UserName",
     "DescribeUserScramCredentialsResult",
     "CredentialInfo",
+    "AlterUserScramCredentialsResult",
+    "ScramCredentialDeletion",
+    "ScramCredentialUpsertion",
 ]
 
 # a list of struct types which are ineligible to have default-generated
