@@ -18,6 +18,7 @@ set(handlers_srcs
   server/handlers/heartbeat.cc
   server/handlers/leave_group.cc
   server/handlers/sync_group.cc
+  server/handlers/alter_scram_credentials.cc
   server/handlers/init_producer_id.cc
   server/handlers/create_topics.cc
   server/handlers/offset_commit.cc
