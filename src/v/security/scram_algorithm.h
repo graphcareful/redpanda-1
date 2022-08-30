@@ -200,6 +200,20 @@ public:
     static constexpr int min_iterations = MinIterations;
     static_assert(min_iterations > 0, "Minimum iterations must be positive");
 
+    static credential_type_t scram_type() {
+        if constexpr (
+          std::is_same_v<
+            hmac_sha256,
+            MacType> && std::is_same_v<hash_sha256, HashType>) {
+            return credential_type_t::SHA_256;
+        } else if constexpr (
+          std::is_same_v<
+            hmac_sha512,
+            MacType> && std::is_same_v<hash_sha512, HashType>) {
+            return credential_type_t::SHA_512;
+        }
+    }
+
     static bytes client_signature(
       bytes_view stored_key,
       const client_first_message& client_first,
@@ -245,7 +259,8 @@ public:
           std::move(salt),
           std::move(serverkey),
           std::move(storedkey),
-          iterations);
+          iterations,
+          scram_type());
     }
 
     static bytes client_proof(

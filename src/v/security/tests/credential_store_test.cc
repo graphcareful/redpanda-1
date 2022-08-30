@@ -24,13 +24,15 @@ BOOST_AUTO_TEST_CASE(credential_store_test) {
       bytes("salty"),
       bytes("i'm a server key"),
       bytes("i'm the stored key"),
-      123456);
+      123456,
+      credential_type_t::none);
 
     const scram_credential cred1(
       bytes("salty2"),
       bytes("i'm a server key2"),
       bytes("i'm the stored key2"),
-      1234567);
+      1234567,
+      credential_type_t::none);
 
     auto cred0_copy = cred0;
     auto cred1_copy = cred1;

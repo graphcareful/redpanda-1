@@ -17,18 +17,37 @@
 
 namespace security {
 
+enum class credential_type_t : int8_t { none = 0, SHA_256 = 1, SHA_512 = 2 };
+
+inline credential_type_t mechanism_to_credential_type(int8_t mechanism) {
+    switch (mechanism) {
+    case 1:
+        return credential_type_t::SHA_256;
+    case 2:
+        return credential_type_t::SHA_512;
+    default:
+        return credential_type_t::none;
+    }
+}
+
 class scram_credential
-  : public serde::envelope<scram_credential, serde::version<0>> {
+  : public serde::envelope<scram_credential, serde::version<1>> {
 public:
     scram_credential() noexcept = default;
 
     scram_credential(
-      bytes salt, bytes server_key, bytes stored_key, int iterations) noexcept
+      bytes salt,
+      bytes server_key,
+      bytes stored_key,
+      int iterations,
+      credential_type_t type) noexcept
       : _salt(std::move(salt))
       , _server_key(std::move(server_key))
       , _stored_key(std::move(stored_key))
-      , _iterations(iterations) {}
+      , _iterations(iterations)
+      , _type(type) {}
 
+    credential_type_t type() const { return _type; }
     const bytes& salt() const { return _salt; }
     const bytes& server_key() const { return _server_key; }
     const bytes& stored_key() const { return _stored_key; }
@@ -37,7 +56,7 @@ public:
     bool operator==(const scram_credential&) const = default;
 
     auto serde_fields() {
-        return std::tie(_salt, _server_key, _stored_key, _iterations);
+        return std::tie(_salt, _server_key, _stored_key, _iterations, _type);
     }
 
 private:
@@ -47,6 +66,7 @@ private:
     bytes _server_key;
     bytes _stored_key;
     int _iterations{0};
+    credential_type_t _type;
 };
 
 } // namespace security
@@ -84,7 +104,8 @@ struct adl<security::scram_credential> {
           iobuf_to_bytes(salt),
           iobuf_to_bytes(server_key),
           iobuf_to_bytes(stored_key),
-          iterations);
+          iterations,
+          security::credential_type_t::none);
     }
 };
 } // namespace reflection

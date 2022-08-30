@@ -165,7 +165,11 @@ inline security::scram_credential random_credential() {
       random_generators::get_bytes(256),
       random_generators::get_bytes(256),
       random_generators::get_bytes(256),
-      random_generators::get_int(1, 10));
+      random_generators::get_int(1, 10),
+      random_generators::random_choice(
+        {security::credential_type_t::none,
+         security::credential_type_t::SHA_256,
+         security::credential_type_t::SHA_512}));
 }
 
 inline security::resource_type random_resource_type() {
