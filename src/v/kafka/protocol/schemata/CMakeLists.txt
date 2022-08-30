@@ -45,6 +45,8 @@ set(schemata
   describe_acls_response.json
   describe_log_dirs_request.json
   describe_log_dirs_response.json
+  describe_user_scram_credentials_request.json
+  describe_user_scram_credentials_response.json
   create_acls_request.json
   create_acls_response.json
   delete_acls_request.json

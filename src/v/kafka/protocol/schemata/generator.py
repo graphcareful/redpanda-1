@@ -446,6 +446,9 @@ STRUCT_TYPES = [
     "EpochEndOffset",
     "SupportedFeatureKey",
     "FinalizedFeatureKey",
+    "UserName",
+    "DescribeUserScramCredentialsResult",
+    "CredentialInfo",
 ]
 
 # a list of struct types which are ineligible to have default-generated
