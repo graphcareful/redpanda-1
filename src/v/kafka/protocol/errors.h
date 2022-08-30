@@ -227,6 +227,8 @@ enum class error_code : int16_t {
     resource_not_found = 91,
     // A request illegally referred to the same resource twice
     duplicate_resource = 92,
+    // Requested credential would not meet criteria for acceptability
+    unacceptable_credential = 93,
 };
 
 std::ostream& operator<<(std::ostream&, error_code);

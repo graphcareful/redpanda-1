@@ -191,6 +191,8 @@ std::string_view error_code_to_str(error_code error) {
         return "resource_not_found";
     case error_code::duplicate_resource:
         return "duplicate_resource";
+    case error_code::unacceptable_credential:
+        return "unacceptable_credential";
     default:
         std::terminate(); // make gcc happy
     }

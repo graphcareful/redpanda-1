@@ -263,6 +263,19 @@ public:
           scram_type());
     }
 
+    static scram_credential
+    make_credentials(bytes salt, bytes salted_password, int iterations) {
+        auto clientkey = client_key(salted_password);
+        auto storedkey = stored_key(clientkey);
+        auto serverkey = server_key(salted_password);
+        return scram_credential(
+          std::move(salt),
+          std::move(serverkey),
+          std::move(storedkey),
+          iterations,
+          scram_type());
+    }
+
     static bytes client_proof(
       bytes_view salted_password,
       const client_first_message& client_first,

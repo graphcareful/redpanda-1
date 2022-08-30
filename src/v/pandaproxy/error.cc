@@ -125,6 +125,7 @@ std::error_condition make_error_condition(std::error_code ec) {
         case kec::not_controller:
         case kec::duplicate_resource:
         case kec::resource_not_found:
+        case kec::unacceptable_credential:
         case kec::invalid_request:
         case kec::unsupported_for_message_format:
         case kec::policy_violation:

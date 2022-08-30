@@ -68,11 +68,13 @@ private:
 struct scram_sha256_authenticator {
     using auth = scram_authenticator<scram_sha256>;
     static constexpr const char* name = "SCRAM-SHA-256";
+    static constexpr credential_type_t mech = credential_type_t::SHA_256;
 };
 
 struct scram_sha512_authenticator {
     using auth = scram_authenticator<scram_sha512>;
     static constexpr const char* name = "SCRAM-SHA-512";
+    static constexpr credential_type_t mech = credential_type_t::SHA_512;
 };
 
 } // namespace security
