@@ -6,6 +6,7 @@ add_compile_options(-Wall)
 # libraries
 add_subdirectory(test_utils)
 add_subdirectory(ssx)
+add_subdirectory(debug)
 add_subdirectory(finjector)
 add_subdirectory(hashing)
 add_subdirectory(random)

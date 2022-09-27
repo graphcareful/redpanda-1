@@ -1,0 +1,22 @@
+{
+    "namespace": "debug",
+    "service_name": "self_test",
+    "includes": ["debug/types.h"],
+    "methods": [
+        {
+            "name": "start",
+            "input_type": "self_test_start_request",
+            "output_type": "self_test_start_reply"
+        },
+        {
+            "name": "stop",
+            "input_type": "self_test_stop_request",
+            "output_type": "self_test_stop_reply"
+        },
+        {
+            "name": "status",
+            "input_type": "self_test_status_request",
+            "output_type": "self_test_status_reply"
+        }
+    ]
+}
