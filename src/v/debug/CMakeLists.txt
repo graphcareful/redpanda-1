@@ -9,6 +9,7 @@ rpcgen(
 v_cc_library(
   NAME debug
   SRCS
+    orchestrator.cc
     service.cc
     logger.cc
   DEPS
