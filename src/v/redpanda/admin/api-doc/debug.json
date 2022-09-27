@@ -8,6 +8,55 @@
     ],
     "apis": [
         {
+            "path": "/v1/debug/self_test_status",
+            "operations": [
+                {
+                    "method": "GET",
+                    "summary": "Get information about self-test status",
+                    "type": "self_test_response",
+                    "nickname": "query_self_test",
+                    "produces": [
+                        "application/json"
+                    ],
+                    "parameters": []
+                }
+            ]
+        },
+        {
+            "path": "/v1/debug/self_test/{state}",
+            "operations": [
+                {
+                    "method": "POST",
+                    "summary": "Start or stop the redpanda self-test",
+                    "type": "void",
+                    "nickname": "modify_self_test_state",
+                    "produces": [
+                        "application/json"
+                    ],
+                    "parameters": [
+                        {
+                            "name": "state",
+                            "in": "path",
+                            "required": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "disk_test_timeout_sec",
+                            "in": "path",
+                            "required": false,
+                            "type": "integer"
+                        },
+                        {
+                            "name": "network_test_timeout_sec",
+                            "in": "query",
+                            "required": false,
+                            "type": "integer"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
             "path": "/v1/debug/reset_leaders",
             "operations": [
                 {
@@ -64,6 +113,16 @@
         }
     ],
     "models": {
+        "self_test_response": {
+            "id": "self_test_response",
+            "description": "Status of the current or previous redpanda self test",
+            "properties": {
+                "id": {
+                    "type": "long",
+                    "description": "Id of the redpanda self-test run"
+                }
+            }
+        },
         "leader_info": {
             "id": "leader_info",
             "description": "Leader info",
