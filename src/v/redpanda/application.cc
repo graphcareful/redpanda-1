@@ -40,6 +40,7 @@
 #include "config/seed_server.h"
 #include "coproc/api.h"
 #include "coproc/partition_manager.h"
+#include "debug/service.h"
 #include "kafka/client/configuration.h"
 #include "kafka/server/coordinator_ntp_mapper.h"
 #include "kafka/server/group_manager.h"
@@ -1425,6 +1426,10 @@ void application::start_redpanda(::stop_signal& app_signal) {
             _scheduling_groups.node_status(),
             smp_service_groups.cluster_smp_sg(),
             std::ref(node_status_backend));
+
+          proto->register_service<debug::service>(
+            _scheduling_groups.cluster_sg(),
+            smp_service_groups.cluster_smp_sg());
 
           if (!config::shard_local_cfg().disable_metrics()) {
               proto->setup_metrics();

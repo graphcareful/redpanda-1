@@ -10,8 +10,8 @@
  */
 
 #pragma once
-#include "debug/disk_test.h"
 #include "debug/self_test_gen_service.h"
+#include "debug/waste_time_task.h"
 #include "seastarx.h"
 
 #include <seastar/core/scheduling.hh>
@@ -26,19 +26,26 @@ public:
     service(ss::scheduling_group sc, ss::smp_service_group ssg);
 
     ss::future<self_test_start_reply>
-    start(self_test_start_request&& req, rpc::streaming_context&) final {
-        co_return self_test_start_reply{};
-    }
+    start(self_test_start_request&& req, rpc::streaming_context&) final;
 
     ss::future<self_test_stop_reply>
-    stop(self_test_stop_request&& req, rpc::streaming_context&) final {
-        co_return self_test_stop_reply{};
-    }
+    stop(self_test_stop_request&& req, rpc::streaming_context&) final;
 
     ss::future<self_test_status_reply>
-    status(self_test_status_request&& req, rpc::streaming_context&) final {
-        co_return self_test_status_reply{};
-    }
+    status(self_test_status_request&& req, rpc::streaming_context&) final;
+
+private:
+    bool are_jobs_running() const { return _gate.get_count() > 0; }
+
+    ss::future<std::vector<test_results>> do_start(test_parameters params);
+
+private:
+    ss::gate _gate;
+    disk_test _disk_test;
+    network_test _network_test;
+
+    test_id _last_test{-1};
+    std::vector<test_results> _previous_results;
 };
 
 } // namespace debug
