@@ -14,6 +14,7 @@
 #include "cluster/fwd.h"
 #include "config/endpoint_tls_config.h"
 #include "coproc/partition_manager.h"
+#include "debug/orchestrator.h"
 #include "model/metadata.h"
 #include "request_auth.h"
 #include "rpc/connection_cache.h"
@@ -53,7 +54,8 @@ public:
       ss::sharded<cluster::metadata_cache>&,
       ss::sharded<archival::scheduler_service>&,
       ss::sharded<rpc::connection_cache>&,
-      ss::sharded<cluster::node_status_table>&);
+      ss::sharded<cluster::node_status_table>&,
+      ss::sharded<debug::orchestrator>&);
 
     ss::future<> start();
     ss::future<> stop();
@@ -236,6 +238,7 @@ private:
     ss::sharded<cluster::shard_table>& _shard_table;
     ss::sharded<cluster::metadata_cache>& _metadata_cache;
     ss::sharded<rpc::connection_cache>& _connection_cache;
+    ss::sharded<debug::orchestrator>& _self_test;
     request_authenticator _auth;
     bool _ready{false};
     ss::sharded<archival::scheduler_service>& _archival_service;

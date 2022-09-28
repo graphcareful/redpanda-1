@@ -585,7 +585,7 @@ void application::configure_admin_server() {
       std::ref(metadata_cache),
       std::ref(archival_scheduler),
       std::ref(_connection_cache),
-      std::ref(node_status_table))
+      std::ref(node_status_table)) std::ref(controller->get_orchestrator())
       .get();
 }
 

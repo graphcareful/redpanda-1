@@ -125,6 +125,7 @@ v_cc_library(
     Roaring::roaring
     absl::flat_hash_map
     v::model
+    v::debug
     v::v8_engine
     v::cloud_storage
     v::features

@@ -107,7 +107,8 @@ admin_server::admin_server(
   ss::sharded<cluster::metadata_cache>& metadata_cache,
   ss::sharded<archival::scheduler_service>& archival_service,
   ss::sharded<rpc::connection_cache>& connection_cache,
-  ss::sharded<cluster::node_status_table>& node_status_table)
+  ss::sharded<cluster::node_status_table>& node_status_table,
+  ss::sharded<debug::orchestrator>& self_test)
   : _log_level_timer([this] { log_level_timer_handler(); })
   , _server("admin")
   , _cfg(std::move(cfg))
@@ -117,6 +118,7 @@ admin_server::admin_server(
   , _shard_table(st)
   , _metadata_cache(metadata_cache)
   , _connection_cache(connection_cache)
+  , _self_test(self_test)
   , _auth(config::shard_local_cfg().admin_api_require_auth.bind(), _controller)
   , _archival_service(archival_service)
   , _node_status_table(node_status_table) {}
@@ -2794,6 +2796,61 @@ void admin_server::register_transaction_routes() {
 }
 
 void admin_server::register_debug_routes() {
+    register_route<user>(
+      ss::httpd::debug_json::query_self_test,
+      [this](std::unique_ptr<ss::httpd::request>)
+        -> ss::future<ss::json::json_return_type> {
+          vlog(logger.info, "Requet to query self_test!");
+          const auto status = co_await _self_test.invoke_on(
+            debug::orchestrator::shard,
+            [](debug::orchestrator& os) { return os.status(); });
+          ss::httpd::debug_json::self_test_response str;
+          str.id = static_cast<std::underlying_type_t<debug::status>>(status);
+          co_return ss::json::json_return_type(str);
+      });
+
+    register_route<user>(
+      ss::httpd::debug_json::modify_self_test_state,
+      [this](std::unique_ptr<ss::httpd::request> req)
+        -> ss::future<ss::json::json_return_type> {
+          vlog(
+            logger.info, "Request to start/stop self_test - {}", req->content);
+          const auto state = model::topic(req->param["state"]);
+          auto query_param_or_default =
+            [](
+              std::unique_ptr<ss::httpd::request>& req,
+              const ss::sstring& key,
+              int default_value) {
+                auto val = req->get_query_param(key);
+                return std::chrono::seconds(
+                  val == "" ? default_value : std::stoi(val));
+            };
+
+          if (state == "stop") {
+              co_await _self_test.invoke_on(
+                debug::orchestrator::shard,
+                [](debug::orchestrator& os) { return os.stop_test(); });
+          } else if (state == "start") {
+              debug::test_parameters params{
+                .disk_test_timeout_sec = query_param_or_default(
+                  req, "disk_test_timeout_sec", 5),
+                .network_test_timeout_sec = query_param_or_default(
+                  req, "network_test_timeout_sec", 5),
+              };
+              co_await _self_test.invoke_on(
+                debug::orchestrator::shard, [params](debug::orchestrator& os) {
+                    return os.start_test(params);
+                });
+          } else {
+              throw ss::httpd::bad_request_exception(
+                "State must be either 'start' or 'stop'");
+          }
+
+          // TODO: this?
+          // co_await throw_on_error(*req, res.error(), model::controller_ntp);
+          co_return ss::json::json_void();
+      });
+
     register_route<user>(
       ss::httpd::debug_json::reset_leaders_info,
       [this](std::unique_ptr<ss::httpd::request>)

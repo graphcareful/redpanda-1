@@ -148,6 +148,13 @@ ss::future<> controller::start() {
             std::ref(_as));
       })
       .then([this] {
+          return _self_test.start_single(
+            _raft0->self().id(),
+            std::ref(_members_table),
+            std::ref(_partition_leaders),
+            std::ref(_connections));
+      })
+      .then([this] {
           return _stm.start_single(
             std::ref(clusterlog),
             _raft0.get(),
@@ -256,6 +263,10 @@ ss::future<> controller::start() {
       .then([this] {
           return _config_manager.invoke_on(
             config_manager::shard, &config_manager::start);
+      })
+      .then([this] {
+          return _self_test.invoke_on(
+            debug::orchestrator::shard, &debug::orchestrator::start);
       })
       .then([this] {
           return _feature_manager.start_single(
@@ -398,6 +409,7 @@ ss::future<> controller::stop() {
           .then([this] { return _hm_backend.stop(); })
           .then([this] { return _health_manager.stop(); })
           .then([this] { return _members_backend.stop(); })
+          .then([this] { return _self_test.stop(); })
           .then([this] { return _config_manager.stop(); })
           .then([this] { return _api.stop(); })
           .then([this] { return _backend.stop(); })
@@ -452,7 +464,8 @@ ss::future<> controller::cluster_creation_hook() {
       = co_await _security_frontend.local().maybe_create_bootstrap_user();
     vassert(
       err == errc::success,
-      "Controller write should always succeed in single replica state during "
+      "Controller write should always succeed in single replica state "
+      "during "
       "creation");
 }
 

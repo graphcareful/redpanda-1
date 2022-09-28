@@ -15,6 +15,7 @@
 #include "cluster/controller_stm.h"
 #include "cluster/fwd.h"
 #include "cluster/scheduling/leader_balancer.h"
+#include "debug/orchestrator.h"
 #include "raft/fwd.h"
 #include "rpc/fwd.h"
 #include "security/authorizer.h"
@@ -47,6 +48,8 @@ public:
     ss::sharded<members_manager>& get_members_manager() {
         return _members_manager;
     }
+
+    ss::sharded<debug::orchestrator>& get_orchestrator() { return _self_test; }
 
     ss::sharded<config_frontend>& get_config_frontend() {
         return _config_frontend;
@@ -165,6 +168,7 @@ private:
     ss::sharded<feature_manager> _feature_manager;        // single instance
     ss::sharded<feature_backend> _feature_backend;        // instance per core
     ss::sharded<features::feature_table>& _feature_table; // instance per core
+    ss::sharded<debug::orchestrator> _self_test;          // single instance
     std::unique_ptr<leader_balancer> _leader_balancer;
     ss::sharded<partition_balancer_backend> _partition_balancer;
     ss::gate _gate;
