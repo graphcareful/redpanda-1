@@ -14,6 +14,7 @@
 #include <absl/hash/hash.h>
 #include <boost/functional/hash.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
 #include <vector>
@@ -29,6 +30,11 @@ public:
     using underlying_t = boost::uuids::uuid;
 
     underlying_t uuid;
+
+    static uuid_t create_random_uuid() {
+        boost::uuids::random_generator uuid_gen;
+        return uuid_t(uuid_gen());
+    }
 
     explicit uuid_t(const underlying_t& uuid)
       : uuid(uuid) {}
