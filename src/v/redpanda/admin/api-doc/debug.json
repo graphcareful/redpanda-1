@@ -8,6 +8,63 @@
     ],
     "apis": [
         {
+            "path": "/v1/debug/self_test/start",
+            "operations": [
+                {
+                    "method": "POST",
+                    "summary": "Start a redpanda self test",
+                    "type": "self_test_status",
+                    "nickname": "start_self_test",
+                    "produces": [
+                        "application/json"
+                    ],
+                    "parameters": [
+                        {
+                            "name": "disk_test_timeout_sec",
+                            "in": "path",
+                            "required": false,
+                            "type": "integer"
+                        },
+                        {
+                            "name": "network_test_timeout_sec",
+                            "in": "query",
+                            "required": false,
+                            "type": "integer"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "path": "/v1/debug/self_test/stop",
+            "operations": [
+                {
+                    "method": "POST",
+                    "summary": "Stop all redpanda self tests",
+                    "type": "self_test_status",
+                    "nickname": "stop_self_test",
+                    "produces": [
+                        "application/json"
+                    ]
+                }
+            ]
+        },
+        {
+            "path": "/v1/debug/self_test/status",
+            "operations": [
+                {
+                    "method": "GET",
+                    "summary": "Get information about self-test status",
+                    "type": "self_test_status",
+                    "nickname": "query_self_test",
+                    "produces": [
+                        "application/json"
+                    ],
+                    "parameters": []
+                }
+            ]
+        },
+        {
             "path": "/v1/debug/reset_leaders",
             "operations": [
                 {
@@ -109,6 +166,20 @@
                 "since_last_status": {
                     "type": "long",
                     "description": "Milliseconds since last update from peer"
+                }
+            }
+        },
+        "self_test_status": {
+            "id": "self_test_status",
+            "description": "Self test current state",
+            "properties": {
+                "current_test_id": {
+                    "type": "string",
+                    "description": "identifier of currently running test (if exists)"
+                },
+                "error_code": {
+                    "type": "long",
+                    "description": "Status of self_test harness"
                 }
             }
         }
