@@ -126,6 +126,7 @@ ss::future<> admin_server::start() {
     configure_admin_routes();
 
     co_await configure_listeners();
+    co_await _self_test.start_single();
 
     vlog(
       logger.info,
@@ -133,7 +134,10 @@ ss::future<> admin_server::start() {
       _cfg.endpoints);
 }
 
-ss::future<> admin_server::stop() { return _server.stop(); }
+ss::future<> admin_server::stop() {
+    co_await _self_test.stop();
+    co_await _server.stop();
+}
 
 void admin_server::configure_admin_routes() {
     auto rb = ss::make_shared<ss::api_registry_builder20>(
@@ -2795,13 +2799,90 @@ void admin_server::register_transaction_routes() {
 
 void admin_server::register_debug_routes() {
     register_route<user>(
+      ss::httpd::debug_json::start_self_test,
+      [this](std::unique_ptr<ss::httpd::request> req)
+        -> ss::future<ss::json::json_return_type> {
+          vlog(logger.info, "Request to start self_test");
+          if (req->content_length != uuid_t::length) {
+              throw ss::httpd::bad_param_exception(fmt::format(
+                "Expected 16 character UUID in POST body, encountered body "
+                "with length {} instead",
+                req->content_length));
+          }
+
+          uuid_t id;
+          try {
+              id = uuid_t::from_bytes(req->content);
+          } catch (...) {
+              throw ss::httpd::bad_param_exception(fmt::format(
+                "Failed to cast content body to a uuid: {}", req->content));
+          }
+          auto query_param_or_default =
+            [](
+              std::unique_ptr<ss::httpd::request>& req,
+              const ss::sstring& key,
+              int default_value) {
+                auto val = req->get_query_param(key);
+                return std::chrono::seconds(
+                  val == "" ? default_value : std::stoi(val));
+            };
+          self_test::test_parameters params{
+            .disk_test_timeout_sec = query_param_or_default(
+              req, "disk_test_timeout_sec", 5),
+            .network_test_timeout_sec = query_param_or_default(
+              req, "network_test_timeout_sec", 5),
+          };
+          const auto report = co_await _self_test.invoke_on(
+            self_test::main_test_shard, [id, params](self_test::harness& h) {
+                return h.start_test(id, params);
+            });
+          ss::httpd::debug_json::self_test_status sts;
+          sts.current_test_id = report.id.to_string();
+          sts.error_code
+            = static_cast<std::underlying_type_t<self_test::error_code>>(
+              report.ec);
+          co_return ss::json::json_return_type(sts);
+      });
+
+    register_route<user>(
+      ss::httpd::debug_json::stop_self_test,
+      [this](std::unique_ptr<ss::httpd::request>)
+        -> ss::future<ss::json::json_return_type> {
+          vlog(logger.info, "Request to stop self_tests");
+          const auto report = co_await _self_test.invoke_on(
+            self_test::main_test_shard,
+            [](self_test::harness& h) { return h.stop_test(); });
+          ss::httpd::debug_json::self_test_status sts;
+          sts.current_test_id = report.id.to_string();
+          sts.error_code
+            = static_cast<std::underlying_type_t<self_test::error_code>>(
+              report.ec);
+          co_return ss::json::json_return_type(sts);
+      });
+
+    register_route<user>(
+      ss::httpd::debug_json::query_self_test,
+      [this](std::unique_ptr<ss::httpd::request>)
+        -> ss::future<ss::json::json_return_type> {
+          vlog(logger.info, "Request to query self_test");
+          const auto report = co_await _self_test.invoke_on(
+            self_test::main_test_shard,
+            [](const self_test::harness& h) { return h.get_test_status(); });
+          ss::httpd::debug_json::self_test_status sts;
+          sts.current_test_id = report.id.to_string();
+          sts.error_code
+            = static_cast<std::underlying_type_t<self_test::error_code>>(
+              report.ec);
+          co_return ss::json::json_return_type(sts);
+      });
+
+    register_route<user>(
       ss::httpd::debug_json::reset_leaders_info,
       [this](std::unique_ptr<ss::httpd::request>)
         -> ss::future<ss::json::json_return_type> {
           vlog(logger.info, "Request to reset leaders info");
           co_await _metadata_cache.invoke_on_all(
             [](auto& mc) { mc.reset_leaders(); });
-
           co_return ss::json::json_void();
       });
 

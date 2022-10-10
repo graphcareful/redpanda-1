@@ -18,6 +18,7 @@
 #include "request_auth.h"
 #include "rpc/connection_cache.h"
 #include "seastarx.h"
+#include "self_test.h"
 
 #include <seastar/core/scheduling.hh>
 #include <seastar/core/sstring.hh>
@@ -230,6 +231,7 @@ private:
 
     ss::http_server _server;
     admin_server_cfg _cfg;
+    ss::sharded<self_test::harness> _self_test; // only on one shard
     ss::sharded<cluster::partition_manager>& _partition_manager;
     ss::sharded<coproc::partition_manager>& _cp_partition_manager;
     cluster::controller* _controller;
