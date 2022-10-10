@@ -30,6 +30,20 @@ public:
 
     underlying_t uuid;
 
+    static uuid_t from_bytes(const ss::sstring& s) {
+        if (s.size() != length) {
+            details::throw_out_of_range(
+              "Expected size of {} for UUID, got {}", length, s.size());
+        }
+        uuid_t::underlying_t uid;
+        auto itr = uid.begin();
+        for (char c : s) {
+            (*itr) = static_cast<uint8_t>(c);
+            ++itr;
+        }
+        return uuid_t(uid);
+    };
+
     explicit uuid_t(const underlying_t& uuid)
       : uuid(uuid) {}
 
@@ -43,6 +57,8 @@ public:
     }
 
     uuid_t() noexcept = default;
+
+    ss::sstring to_string() const { return boost::uuids::to_string(uuid); }
 
     std::vector<uint8_t> to_vector() const {
         return {uuid.begin(), uuid.end()};
