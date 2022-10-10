@@ -42,6 +42,7 @@ v_cc_library(
     admin_server.cc
     cli_parser.cc
     request_auth.cc
+    self_test.cc
     application.cc
   DEPS
     Seastar::seastar
