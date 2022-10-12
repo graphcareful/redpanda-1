@@ -52,6 +52,13 @@ public:
     }
 
     ss::future<> stop() {
+        if (_as.abort_requested()) {
+            if (_gate.is_closed()) {
+                // already shut down
+            } else {
+                // in progress
+            }
+        }
         _as.request_abort();
         return _gate.close();
     }

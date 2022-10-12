@@ -25,7 +25,8 @@ orchestrator::orchestrator(
   , _leaders(leaders)
   , _connections(connections) {}
 
-ss::future<error_code> orchestrator::start_test(test_parameters params) {
+ss::future<orchestrator::id_or_failure>
+orchestrator::start_test(test_parameters params) {
     const auto current_status = co_await status();
     if (current_status != error_code::not_started) {
         /// cannot start a test because there is either a connectivity issue or
@@ -43,13 +44,30 @@ ss::future<error_code> orchestrator::start_test(test_parameters params) {
         co_return error_code::not_leader;
     }
 
-    auto results = co_await invoke_on_all_peers(
-      _self, [params](self_test_client_protocol c) {
+    auto tid = uuid_t::create_random_uuid();
+    auto peers = _members.local().all_broker_ids();
+    auto results = co_await invoke_on_peers(
+      _self, peers, [peers, params, tid](self_test_client_protocol c) {
           return c.start(
-            self_test_start_request{.parameters = params},
+            self_test_start_request{
+              .id = tid, .participants = peers, .parameters = params},
             rpc::client_opts(raft::clock_type::now() + 2s));
       });
-    co_return error_code::success;
+
+    /// Perform a high level sanity check, allows client to know sooner if there
+    /// is something wrong so it can quickly issue a subsequent stop command, in
+    /// the case the test was partially deployed
+    const auto succeeded = std::all_of(
+      results.begin(), results.end(), [](const auto& r) {
+          return r.second.value().data.ec == error_code::success;
+      });
+    if (!succeeded) {
+        vlog(dbg.warn, "Failed to fully start self_test, id: {}", tid);
+        co_return error_code::failed;
+    }
+
+    /// test id returned so client can correlate test runs with requests issued
+    co_return tid;
 }
 
 ss::future<error_code> orchestrator::stop_test() {
@@ -140,7 +158,7 @@ ss::future<error_code> orchestrator::status() {
 
     /// List of ids is mixed between not started ids, and some that all match,
     /// meaning that some (not all) brokers are still running jobs
-    co_return error_code::started;
+    co_return error_code::running;
 }
 
 ss::future<> orchestrator::initialize_peer_connection(

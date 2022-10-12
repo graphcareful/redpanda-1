@@ -2810,12 +2810,18 @@ void admin_server::register_debug_routes() {
       });
 
     register_route<user>(
-      ss::httpd::debug_json::modify_self_test_state,
+      ss::httpd::debug_json::stop_self_test,
       [this](std::unique_ptr<ss::httpd::request> req)
         -> ss::future<ss::json::json_return_type> {
-          vlog(
-            logger.info, "Request to start/stop self_test - {}", req->content);
-          const auto state = model::topic(req->param["state"]);
+          vlog(logger.info, "Request to stop self_test received");
+          co_return ss::json::json_void();
+      });
+
+    register_route<user>(
+      ss::httpd::debug_json::start_self_test,
+      [this](std::unique_ptr<ss::httpd::request> req)
+        -> ss::future<ss::json::json_return_type> {
+          vlog(logger.info, "Request to start self_test received");
           auto query_param_or_default =
             [](
               std::unique_ptr<ss::httpd::request>& req,
@@ -2826,28 +2832,19 @@ void admin_server::register_debug_routes() {
                   val == "" ? default_value : std::stoi(val));
             };
 
-          if (state == "stop") {
-              co_await _self_test.invoke_on(
-                debug::orchestrator::shard,
-                [](debug::orchestrator& os) { return os.stop_test(); });
-          } else if (state == "start") {
-              debug::test_parameters params{
-                .disk_test_timeout_sec = query_param_or_default(
-                  req, "disk_test_timeout_sec", 5),
-                .network_test_timeout_sec = query_param_or_default(
-                  req, "network_test_timeout_sec", 5),
-              };
-              co_await _self_test.invoke_on(
-                debug::orchestrator::shard, [params](debug::orchestrator& os) {
-                    return os.start_test(params);
-                });
-          } else {
-              throw ss::httpd::bad_request_exception(
-                "State must be either 'start' or 'stop'");
-          }
-
+          debug::test_parameters params{
+            .disk_test_timeout_sec = query_param_or_default(
+              req, "disk_test_timeout_sec", 5),
+            .network_test_timeout_sec = query_param_or_default(
+              req, "network_test_timeout_sec", 5),
+          };
+          const auto r = co_await _self_test.invoke_on(
+            debug::orchestrator::shard, [params](debug::orchestrator& os) {
+                return os.start_test(params);
+            });
           // TODO: this?
           // co_await throw_on_error(*req, res.error(), model::controller_ntp);
+          vlog(logger.info, "Orchestrator status: {}", (int)r);
           co_return ss::json::json_void();
       });
 

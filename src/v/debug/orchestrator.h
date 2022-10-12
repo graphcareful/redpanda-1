@@ -22,22 +22,12 @@
 
 namespace debug {
 
-enum class error_code {
-    success = 0,
-    failed = 1,
-    not_leader = 2,
-    no_leader_available = 3,
-    partially_started = 4,
-    peer_unreachable = 5,
-    inconsistent_status = 6,
-    not_started = 7,
-    started = 8
-};
-
 /// API for interaction with the redpanda self test feature
 class orchestrator {
 public:
     static constexpr ss::shard_id shard = 0;
+
+    using id_or_failure = std::variant<uuid_t, error_code>;
 
     orchestrator(
       model::node_id self,
@@ -48,7 +38,7 @@ public:
     ss::future<> start() { return ss::now(); }
     ss::future<> stop() { return ss::now(); }
 
-    ss::future<error_code> start_test(test_parameters parameters);
+    ss::future<id_or_failure> start_test(test_parameters parameters);
     ss::future<error_code> stop_test();
     ss::future<error_code> status();
 
@@ -74,7 +64,6 @@ private:
       model::node_id self, std::vector<model::node_id> peers, Func f) {
         std::vector<ss::future<result_via_peer_t<Func>>> r;
         for (const auto& node_id : peers) {
-            vlog(dbg.info, "NODE ID: {}", node_id);
             if (!_connections.local().contains(node_id)) {
                 co_await initialize_peer_connection(self, node_id);
             }

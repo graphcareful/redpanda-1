@@ -18,31 +18,32 @@
                     "produces": [
                         "application/json"
                     ],
-                    "parameters": []
+                    "parameters": [
+                        {
+                            "name": "test_identifier",
+                            "in": "query",
+                            "required": false,
+                            "type": "integer"
+                        },
+                    ]
                 }
             ]
         },
         {
-            "path": "/v1/debug/self_test/{state}",
+            "path": "/v1/debug/start_self_test",
             "operations": [
                 {
                     "method": "POST",
-                    "summary": "Start or stop the redpanda self-test",
+                    "summary": "Start the redpanda self-test",
                     "type": "void",
-                    "nickname": "modify_self_test_state",
+                    "nickname": "start_self_test",
                     "produces": [
                         "application/json"
                     ],
                     "parameters": [
                         {
-                            "name": "state",
-                            "in": "path",
-                            "required": true,
-                            "type": "string"
-                        },
-                        {
                             "name": "disk_test_timeout_sec",
-                            "in": "path",
+                            "in": "query",
                             "required": false,
                             "type": "integer"
                         },
@@ -53,6 +54,21 @@
                             "type": "integer"
                         }
                     ]
+                }
+            ]
+        },
+        {
+            "path": "/v1/debug/stop_self_test",
+            "operations": [
+                {
+                    "method": "POST",
+                    "summary": "Stop the redpanda self-test",
+                    "type": "void",
+                    "nickname": "stop_self_test",
+                    "produces": [
+                        "application/json"
+                    ],
+                    "parameters": []
                 }
             ]
         },
