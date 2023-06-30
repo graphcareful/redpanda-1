@@ -20,9 +20,8 @@
 
 namespace kafka {
 
-static constexpr std::string_view period_key{"period"};
-static constexpr std::string_view max_duration_key{"max_duration"};
-static constexpr std::string_view buckets_key{"buckets"};
+static constexpr std::string_view node_throughput_usage_data_key{
+  "node_throughput_usage"};
 
 static bytes key_to_bytes(std::string_view sv) {
     bytes k;
@@ -30,38 +29,30 @@ static bytes key_to_bytes(std::string_view sv) {
     return k;
 }
 
-struct persisted_state {
+struct usage_data
+  : serde::envelope<usage_data, serde::version<0>, serde::compat_version<0>> {
+    /// Configuration metadata
     std::chrono::seconds configured_period;
     size_t configured_windows;
+
+    /// All recorded usage data one bucket == 1 window of configured period size
     fragmented_vector<usage_window> current_state;
 };
 
-static ss::future<>
-persist_to_disk(storage::kvstore& kvstore, persisted_state s) {
+static ss::future<> persist_to_disk(storage::kvstore& kvstore, usage_data s) {
     using kv_ks = storage::kvstore::key_space;
+    co_await kvstore.put(
+      kv_ks::usage,
+      key_to_bytes(node_throughput_usage_data_key),
+      serde::to_iobuf(std::move(s)));
+};
 
-    co_await kvstore.put(
-      kv_ks::usage,
-      key_to_bytes(period_key),
-      serde::to_iobuf(s.configured_period));
-    co_await kvstore.put(
-      kv_ks::usage,
-      key_to_bytes(max_duration_key),
-      serde::to_iobuf(s.configured_windows));
-    co_await kvstore.put(
-      kv_ks::usage,
-      key_to_bytes(buckets_key),
-      serde::to_iobuf(std::move(s.current_state)));
-}
-
-static std::optional<persisted_state>
-restore_from_disk(storage::kvstore& kvstore) {
+static std::optional<usage_data> restore_from_disk(storage::kvstore& kvstore) {
     using kv_ks = storage::kvstore::key_space;
-    std::optional<iobuf> period, windows, data;
+    std::optional<iobuf> data;
     try {
-        period = kvstore.get(kv_ks::usage, key_to_bytes(period_key));
-        windows = kvstore.get(kv_ks::usage, key_to_bytes(max_duration_key));
-        data = kvstore.get(kv_ks::usage, key_to_bytes(buckets_key));
+        data = kvstore.get(
+          kv_ks::usage, key_to_bytes(node_throughput_usage_data_key));
     } catch (const std::exception& ex) {
         vlog(
           klog.debug,
@@ -69,30 +60,17 @@ restore_from_disk(storage::kvstore& kvstore) {
           ex);
         return std::nullopt;
     }
-    if (!period && !windows && !data) {
-        /// Data didn't exist
-        return std::nullopt;
-    } else if (!period || !windows || !data) {
-        vlog(
-          klog.error,
-          "Inconsistent usage_manager on disk state detected, failed to "
-          "recover state");
+    if (!data) {
         return std::nullopt;
     }
-    return persisted_state{
-      .configured_period = serde::from_iobuf<std::chrono::seconds>(
-        std::move(*period)),
-      .configured_windows = serde::from_iobuf<size_t>(std::move(*windows)),
-      .current_state = serde::from_iobuf<fragmented_vector<usage_window>>(
-        std::move(*data))};
+    return serde::from_iobuf<usage_data>(std::move(*data));
 }
 
-static ss::future<> clear_persisted_state(storage::kvstore& kvstore) {
+static ss::future<> clear_usage_data(storage::kvstore& kvstore) {
     using kv_ks = storage::kvstore::key_space;
     try {
-        co_await kvstore.remove(kv_ks::usage, key_to_bytes(period_key));
-        co_await kvstore.remove(kv_ks::usage, key_to_bytes(max_duration_key));
-        co_await kvstore.remove(kv_ks::usage, key_to_bytes(buckets_key));
+        co_await kvstore.remove(
+          kv_ks::usage, key_to_bytes(node_throughput_usage_data_key));
     } catch (const std::exception& ex) {
         vlog(klog.debug, "Ignoring exception from storage layer: {}", ex);
     }
@@ -165,7 +143,7 @@ ss::future<> usage_manager::accounting_fiber::start() {
               "Persisted usage state had been configured with different "
               "options, clearing state and restarting with current "
               "configuration options");
-            co_await clear_persisted_state(_kvstore);
+            co_await clear_usage_data(_kvstore);
         } else {
             last_window_delta = reset_state(std::move(state->current_state));
         }
@@ -177,7 +155,7 @@ ss::future<> usage_manager::accounting_fiber::start() {
               [this] {
                   return persist_to_disk(
                     _kvstore,
-                    persisted_state{
+                    usage_data{
                       .configured_period = _usage_window_width_interval,
                       .configured_windows = _usage_num_windows,
                       .current_state = _buckets.copy()});
@@ -193,7 +171,8 @@ ss::future<> usage_manager::accounting_fiber::start() {
                   using namespace std::chrono_literals;
                   vlog(
                     klog.debug,
-                    "Encountered exception when persisting usage data to disk: "
+                    "Encountered exception when persisting usage data to "
+                    "disk: "
                     "{} , retrying",
                     eptr);
                   if (!_gate.is_closed()) {
@@ -244,7 +223,7 @@ ss::future<> usage_manager::accounting_fiber::stop() {
     try {
         co_await persist_to_disk(
           _kvstore,
-          persisted_state{
+          usage_data{
             .configured_period = _usage_window_width_interval,
             .configured_windows = _usage_num_windows,
             .current_state = _buckets.copy()});
