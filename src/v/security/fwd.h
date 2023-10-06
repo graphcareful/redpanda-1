@@ -17,4 +17,10 @@ class authorizer;
 class credential_store;
 class ephemeral_credential_store;
 
+namespace audit {
+
+class audit_log_manager;
+
+} // namespace audit
+
 } // namespace security
