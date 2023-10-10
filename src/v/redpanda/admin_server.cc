@@ -56,6 +56,7 @@
 #include "json/stringbuffer.h"
 #include "json/validator.h"
 #include "json/writer.h"
+#include "kafka/server/audit_log_manager.h"
 #include "kafka/server/usage_manager.h"
 #include "kafka/types.h"
 #include "model/fundamental.h"
@@ -240,7 +241,8 @@ admin_server::admin_server(
   ss::sharded<storage::node>& storage_node,
   ss::sharded<memory_sampling>& memory_sampling_service,
   ss::sharded<cloud_storage::cache>& cloud_storage_cache,
-  ss::sharded<resources::cpu_profiler>& cpu_profiler)
+  ss::sharded<resources::cpu_profiler>& cpu_profiler,
+  ss::sharded<kafka::audit_log_manager>& audit_mgr)
   : _log_level_timer([this] { log_level_timer_handler(); })
   , _server("admin")
   , _cfg(std::move(cfg))
@@ -267,6 +269,7 @@ admin_server::admin_server(
   , _memory_sampling_service(memory_sampling_service)
   , _cloud_storage_cache(cloud_storage_cache)
   , _cpu_profiler(cpu_profiler)
+  , _audit_mgr(audit_mgr)
   , _default_blocked_reactor_notify(
       ss::engine().get_blocked_reactor_notify_ms()) {
     _server.set_content_streaming(true);

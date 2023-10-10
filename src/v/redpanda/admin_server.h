@@ -84,7 +84,8 @@ public:
       ss::sharded<storage::node>&,
       ss::sharded<memory_sampling>&,
       ss::sharded<cloud_storage::cache>&,
-      ss::sharded<resources::cpu_profiler>&);
+      ss::sharded<resources::cpu_profiler>&,
+      ss::sharded<kafka::audit_log_manager>&);
 
     ss::future<> start();
     ss::future<> stop();
@@ -554,6 +555,7 @@ private:
     ss::sharded<memory_sampling>& _memory_sampling_service;
     ss::sharded<cloud_storage::cache>& _cloud_storage_cache;
     ss::sharded<resources::cpu_profiler>& _cpu_profiler;
+    ss::sharded<kafka::audit_log_manager>& _audit_mgr;
 
     // Value before the temporary override
     std::chrono::milliseconds _default_blocked_reactor_notify;
