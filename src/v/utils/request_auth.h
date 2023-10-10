@@ -81,6 +81,9 @@ public:
     ss::sstring const& get_password() const { return _password; }
     ss::sstring const& get_sasl_mechanism() const { return _sasl_mechanism; }
 
+    bool is_authenticated() const { return _checked && _authenticated; }
+    bool is_superuser() const { return _checked && _superuser; }
+
 private:
     security::credential_user _username;
     security::credential_password _password;
