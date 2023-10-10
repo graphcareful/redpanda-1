@@ -88,6 +88,8 @@
 #include "rpc/errc.h"
 #include "rpc/rpc_utils.h"
 #include "security/acl.h"
+#include "security/audit/schemas/application_activity.h"
+#include "security/audit/schemas/utils.h"
 #include "security/credential_store.h"
 #include "security/scram_algorithm.h"
 #include "security/scram_authenticator.h"
@@ -583,13 +585,30 @@ ss::future<> admin_server::configure_listeners() {
 
 void admin_server::log_request(
   const ss::http::request& req, const request_auth_result& auth_state) const {
-    vlog(
-      logger.debug,
-      "[{}] {} {}",
-      auth_state.get_username().size() > 0 ? auth_state.get_username()
-                                           : "_anonymous",
-      req._method,
-      req.get_url());
+    const auto username = auth_state.get_username().size() > 0
+                            ? auth_state.get_username()
+                            : "_anonymous";
+    vlog(logger.debug, "[{}] {} {}", username, req._method, req.get_url());
+
+    bool pass
+      = _audit_mgr.local().enqueue_audit_event<security::audit::api_activity>(
+        kafka::audit_event_type::management,
+        make_api_activity_event(
+          req,
+          security::audit::authorization_allowed{
+            .username = username,
+            .mechanism = auth_state.get_sasl_mechanism()}));
+
+    if (!pass) {
+        /// Failed to audit (when audit is enabled) results in a 5xx response.
+        vlog(
+          logger.warn,
+          "Rejected request to handle {} due to full audit queues, wait "
+          "again and retry or disable auditing then try again",
+          req.get_url());
+        throw ss::httpd::server_error_exception(
+          "Internal server error, unable to audit any requests");
+    }
 }
 
 void admin_server::log_exception(
