@@ -621,13 +621,38 @@ void admin_server::log_request(
 
     if (!pass) {
         /// Failed to audit (when audit is enabled) results in a 5xx response.
+        ///
+        /// The following "break glass" mechanism allows the cluster config
+        /// API to be hit in the case the user desires to disable auditing
+        /// so the cluster can continue to make progress in the event auditing
+        /// is not working as expected.
+        static const auto allowed_requests = std::to_array(
+          {ss::httpd::cluster_config_json::get_cluster_config_status,
+           ss::httpd::cluster_config_json::get_cluster_config_schema,
+           ss::httpd::cluster_config_json::patch_cluster_config});
+
+        bool is_allowed = std::any_of(
+          allowed_requests.cbegin(),
+          allowed_requests.cend(),
+          [method = req._method,
+           url = req.get_url()](const ss::httpd::path_description& d) {
+              return d.path == url
+                     && d.operations.method == ss::httpd::str2type(method);
+          });
+
+        if (!is_allowed) {
+            vlog(
+              logger.warn,
+              "Rejected request to handle {} due to full audit queues, wait "
+              "again and retry or disable auditing then try again",
+              req.get_url());
+            throw ss::httpd::server_error_exception(
+              "Internal server error, unable to audit any requests");
+        }
         vlog(
-          logger.warn,
-          "Rejected request to handle {} due to full audit queues, wait "
-          "again and retry or disable auditing then try again",
-          req.get_url());
-        throw ss::httpd::server_error_exception(
-          "Internal server error, unable to audit any requests");
+          logger.info,
+          "Request to modify or view cluster config has been exempt, auditing "
+          "system is not draining events");
     }
 }
 
