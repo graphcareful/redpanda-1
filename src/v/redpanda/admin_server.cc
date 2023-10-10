@@ -583,6 +583,26 @@ ss::future<> admin_server::configure_listeners() {
     }
 }
 
+void admin_server::log_authorization_failure(
+  ss::httpd::const_req req, const ss::sstring& reason_msg) {
+    vlog(
+      logger.debug,
+      "[{}] failed to authenticate, requested: [{}] {}",
+      req.get_client_address(),
+      req._method,
+      req.get_url());
+
+    bool pass
+      = _audit_mgr.local().enqueue_audit_event<security::audit::api_activity>(
+        kafka::audit_event_type::management,
+        make_api_activity_event(
+          req, security::audit::authorization_denied{.msg = reason_msg}));
+    if (!pass) {
+        vlog(
+          logger.warn, "Failed to audit authorization failure in admin server");
+    }
+}
+
 void admin_server::log_request(
   const ss::http::request& req, const request_auth_result& auth_state) const {
     const auto username = auth_state.get_username().size() > 0

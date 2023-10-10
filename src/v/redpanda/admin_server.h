@@ -113,21 +113,30 @@ private:
      */
     template<auth_level required_auth>
     request_auth_result apply_auth(ss::httpd::const_req req) {
-        auto auth_state = _auth.authenticate(req);
-        if constexpr (required_auth == auth_level::superuser) {
-            auth_state.require_superuser();
-        } else if constexpr (required_auth == auth_level::user) {
-            auth_state.require_authenticated();
-        } else if constexpr (required_auth == auth_level::publik) {
-            auth_state.pass();
-        } else {
-            static_assert(
-              detail::dependent_false<required_auth>::value,
-              "Invalid auth_level");
-        }
+        try {
+            auto auth_state = _auth.authenticate(req);
+            if constexpr (required_auth == auth_level::superuser) {
+                auth_state.require_superuser();
+            } else if constexpr (required_auth == auth_level::user) {
+                auth_state.require_authenticated();
+            } else if constexpr (required_auth == auth_level::publik) {
+                auth_state.pass();
+            } else {
+                static_assert(
+                  detail::dependent_false<required_auth>::value,
+                  "Invalid auth_level");
+            }
 
-        return auth_state;
+            return auth_state;
+        } catch (const ss::httpd::base_exception& ex) {
+            /// Intercept authorization failure to log/audit reason
+            log_authorization_failure(req, ex.what());
+            throw;
+        }
     }
+
+    void log_authorization_failure(
+      ss::httpd::const_req req, const ss::sstring& reason_msg);
 
     void log_exception(
       const ss::sstring& url,
