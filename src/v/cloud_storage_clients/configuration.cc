@@ -29,7 +29,7 @@ build_tls_credentials(
     // picks the ciphersuites with 128-bit ciphers which
     // leads to up to 10x improvement in upload speed, compared
     // to 256-bit ciphers
-    cred_builder.set_priority_string("PERFORMANCE");
+    // cred_builder.set_priority_string("PERFORMANCE");
     if (trust_file.has_value()) {
         auto file = trust_file.value();
         vlog(log.info, "Use non-default trust file {}", file());
